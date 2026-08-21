@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 
+import { aiKeyboard } from "@/lib/chat/ai-keyboard";
 import {
   type Conversation,
   defaultProviderSettings,
@@ -59,6 +60,16 @@ export async function saveApiKey(apiKey: string): Promise<void> {
     return;
   }
   await writeValue(API_KEY_KEY, apiKey.trim());
+}
+
+export async function syncKeyboardConfiguration(settings: ProviderSettings, apiKey: string): Promise<void> {
+  if (!aiKeyboard.isSupported) return;
+  const canUseChat = Boolean(settings.endpoint.trim() && settings.model.trim() && settings.lastVerifiedModel === settings.model && apiKey.trim());
+  await aiKeyboard.updateConfiguration(
+    canUseChat ? settings.endpoint.trim() : "",
+    canUseChat ? settings.model.trim() : "",
+    canUseChat ? apiKey.trim() : "",
+  );
 }
 
 export async function loadConversations(): Promise<Conversation[]> {

@@ -65,6 +65,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 public class FloatingBubbleService extends Service {
@@ -73,7 +74,9 @@ public class FloatingBubbleService extends Service {
   private static final String ACTION_REFRESH = "${packageName}.REFRESH_FLOATING_BUBBLE";
   private WindowManager windowManager;
   private TextView bubble;
+  private LinearLayout panel;
   private WindowManager.LayoutParams layoutParams;
+  private WindowManager.LayoutParams panelLayoutParams;
 
   @Override public void onCreate() {
     super.onCreate();
@@ -83,10 +86,9 @@ public class FloatingBubbleService extends Service {
   }
 
   @Override public int onStartCommand(Intent intent, int flags, int startId) {
-    if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && bubble != null && windowManager != null) {
-      windowManager.removeView(bubble);
-      bubble = null;
-      showBubble();
+    if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && windowManager != null) {
+      if (bubble != null) { windowManager.removeView(bubble); bubble = null; showBubble(); }
+      if (panel != null) { windowManager.removeView(panel); panel = null; showPanel(); }
     }
     return START_STICKY;
   }
@@ -146,7 +148,7 @@ public class FloatingBubbleService extends Service {
             layoutParams.x = downX + (int) deltaX; layoutParams.y = downY + (int) deltaY;
             windowManager.updateViewLayout(bubble, layoutParams); return true;
           case MotionEvent.ACTION_UP:
-            if (!moved) openChat();
+            if (!moved) showPanel();
             return true;
           default: return false;
         }
@@ -155,15 +157,34 @@ public class FloatingBubbleService extends Service {
     windowManager.addView(bubble, layoutParams);
   }
 
-  private void openChat() {
-    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("${scheme}://chat"));
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-    startActivity(intent);
+  private GradientDrawable rounded(int color, int radiusDp) {
+    GradientDrawable drawable = new GradientDrawable();
+    drawable.setColor(color); drawable.setCornerRadius(dp(radiusDp)); drawable.setStroke(dp(1), Color.rgb(44, 58, 48)); return drawable;
+  }
+
+  private void showPanel() {
+    if (panel != null || windowManager == null) return;
+    panel = new LinearLayout(this); panel.setOrientation(LinearLayout.VERTICAL); panel.setPadding(dp(14), dp(12), dp(14), dp(12)); panel.setBackground(rounded(Color.rgb(12, 26, 22), 18));
+    LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+    TextView title = new TextView(this); title.setText(preferences().getString("overlayTitle", "Floating AI Chat")); title.setTextColor(Color.rgb(242, 247, 241)); title.setTextSize(15); title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD); title.setSingleLine(true);
+    header.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+    TextView close = new TextView(this); close.setText("×"); close.setTextColor(Color.rgb(181, 232, 83)); close.setTextSize(28); close.setGravity(Gravity.CENTER); close.setContentDescription("Close compact AI chat");
+    header.addView(close, new LinearLayout.LayoutParams(dp(34), dp(34))); close.setOnClickListener(v -> dismissPanel());
+    panel.addView(header);
+    TextView excerpt = new TextView(this); excerpt.setText(preferences().getString("overlayExcerpt", "No active conversation yet. Open the app to start a chat.")); excerpt.setTextColor(Color.rgb(220, 231, 221)); excerpt.setTextSize(13); excerpt.setLineSpacing(dp(3), 1f); excerpt.setMaxLines(7); excerpt.setPadding(0, dp(8), 0, dp(8));
+    panel.addView(excerpt);
+    TextView hint = new TextView(this); hint.setText("Floating AI stays here • tap × to dismiss"); hint.setTextColor(Color.rgb(154, 168, 155)); hint.setTextSize(10); panel.addView(hint);
+    panelLayoutParams = new WindowManager.LayoutParams(dp(304), WindowManager.LayoutParams.WRAP_CONTENT, Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT);
+    panelLayoutParams.gravity = Gravity.TOP | Gravity.END; panelLayoutParams.x = dp(14); panelLayoutParams.y = dp(92); windowManager.addView(panel, panelLayoutParams);
+  }
+
+  private void dismissPanel() {
+    if (panel != null && windowManager != null) { windowManager.removeView(panel); panel = null; }
   }
 
   private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
   private android.content.SharedPreferences preferences() { return getSharedPreferences("floating_bubble", 0); }
-  @Override public void onDestroy() { if (bubble != null && windowManager != null) windowManager.removeView(bubble); super.onDestroy(); }
+  @Override public void onDestroy() { if (bubble != null && windowManager != null) windowManager.removeView(bubble); dismissPanel(); super.onDestroy(); }
   @Override public IBinder onBind(Intent intent) { return null; }
 }`;
   const module = `package ${packageName};
@@ -196,6 +217,12 @@ public class FloatingBubbleModule extends ReactContextBaseJavaModule {
     if (preferences.getBoolean("enabled", false)) {
       Intent refresh = new Intent(getReactApplicationContext(), FloatingBubbleService.class); refresh.setAction("${packageName}.REFRESH_FLOATING_BUBBLE"); getReactApplicationContext().startService(refresh);
     }
+    promise.resolve(true);
+  }
+  @ReactMethod public void updateOverlayPreview(String title, String excerpt, Promise promise) {
+    android.content.SharedPreferences preferences = getReactApplicationContext().getSharedPreferences("floating_bubble", 0);
+    preferences.edit().putString("overlayTitle", title == null ? "Floating AI Chat" : title).putString("overlayExcerpt", excerpt == null ? "" : excerpt).apply();
+    if (preferences.getBoolean("enabled", false)) { Intent refresh = new Intent(getReactApplicationContext(), FloatingBubbleService.class); refresh.setAction("${packageName}.REFRESH_FLOATING_BUBBLE"); getReactApplicationContext().startService(refresh); }
     promise.resolve(true);
   }
   @ReactMethod public void requestOverlayPermission(Promise promise) {

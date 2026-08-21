@@ -27,6 +27,7 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  systemInstruction?: string;
 }
 
 export interface ProviderSettings {
@@ -59,7 +60,7 @@ export function createId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export function createConversation(): Conversation {
+export function createConversation(systemInstruction?: string): Conversation {
   const timestamp = new Date().toISOString();
   return {
     id: createId("chat"),
@@ -67,5 +68,6 @@ export function createConversation(): Conversation {
     createdAt: timestamp,
     updatedAt: timestamp,
     messages: [],
+    systemInstruction: systemInstruction?.trim() || undefined,
   };
 }

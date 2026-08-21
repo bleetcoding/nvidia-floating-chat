@@ -18,6 +18,7 @@ type FloatingBubbleBridge = {
   startBubble: () => Promise<boolean>;
   stopBubble: () => Promise<boolean>;
   updateAppearance: (sizeDp: number, color: string) => Promise<boolean>;
+  updateOverlayPreview: (title: string, excerpt: string) => Promise<boolean>;
 };
 
 const bridge = NativeModules.FloatingBubble as FloatingBubbleBridge | undefined;
@@ -44,5 +45,8 @@ export const floatingBubble = {
   },
   async updateAppearance(appearance: BubbleAppearance): Promise<boolean> {
     return bridge ? bridge.updateAppearance(appearance.sizeDp, appearance.color) : false;
+  },
+  async updateOverlayPreview(title: string, excerpt: string): Promise<boolean> {
+    return bridge ? bridge.updateOverlayPreview(title, excerpt) : false;
   },
 };

@@ -86,6 +86,7 @@ const config: ExpoConfig = {
   },
   plugins: [
     "./plugins/with-floating-bubble",
+    "./plugins/with-ai-keyboard",
     "expo-asset",
     "expo-font",
     "expo-router",

@@ -63,6 +63,13 @@ function messageContent(message: ChatMessage, currentAttachments: PreparedAttach
   ];
 }
 
+function requestMessages(messages: ChatMessage[], systemInstruction?: string) {
+  return [
+    ...(systemInstruction?.trim() ? [{ role: "system", content: systemInstruction.trim() }] : []),
+    ...messages.map((message) => ({ role: message.role, content: message.content })),
+  ];
+}
+
 export async function testProviderConnection(settings: ProviderSettings, apiKey: string): Promise<ProviderTestResult> {
   const endpoint = normalizeEndpoint(settings.endpoint);
   if (!endpoint) return { ok: false, status: 0, message: "Enter an API endpoint first.", models: [] };
@@ -107,11 +114,51 @@ export async function testSelectedChatModel(settings: ProviderSettings, apiKey: 
   }
 }
 
+export async function generatePromptSuggestions({
+  settings,
+  apiKey,
+  messages,
+  systemInstruction,
+  signal,
+}: {
+  settings: ProviderSettings;
+  apiKey: string;
+  messages: ChatMessage[];
+  systemInstruction?: string;
+  signal?: AbortSignal;
+}): Promise<string[]> {
+  const response = await fetch(chatCompletionsUrl(settings.endpoint), {
+    method: "POST",
+    signal,
+    headers: { Authorization: `Bearer ${apiKey.trim()}`, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      model: settings.model.trim(),
+      stream: false,
+      temperature: 0.6,
+      max_tokens: 220,
+      messages: [
+        { role: "system", content: "Based on the conversation, return only a JSON array of 3 to 5 concise, useful next prompts the user could send. Do not include markdown or commentary." },
+        ...requestMessages(messages, systemInstruction),
+      ],
+    }),
+  });
+  if (!response.ok) throw new Error(providerError(response.status, response.statusText, await response.text()));
+  const text = extractCompletionText(await response.text()).trim();
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 5);
+  } catch {
+    // Fall through for providers that return a newline list instead of JSON.
+  }
+  return text.split(/\n+/).map((item) => item.replace(/^[-*\d.\s]+/, "").trim()).filter(Boolean).slice(0, 5);
+}
+
 export async function streamChatCompletion({
   settings,
   apiKey,
   messages,
   currentAttachments,
+  systemInstruction,
   signal,
   onDelta,
 }: {
@@ -119,6 +166,7 @@ export async function streamChatCompletion({
   apiKey: string;
   messages: ChatMessage[];
   currentAttachments: PreparedAttachment[];
+  systemInstruction?: string;
   signal: AbortSignal;
   onDelta: (delta: string) => void;
 }): Promise<void> {
@@ -128,10 +176,13 @@ export async function streamChatCompletion({
     headers: { Authorization: `Bearer ${apiKey.trim()}`, "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
       model: settings.model.trim(),
-      messages: messages.map((message, index) => ({
-        role: message.role,
-        content: index === messages.length - 1 && message.role === "user" ? messageContent(message, currentAttachments) : message.content,
-      })),
+      messages: [
+        ...(systemInstruction?.trim() ? [{ role: "system", content: systemInstruction.trim() }] : []),
+        ...messages.map((message, index) => ({
+          role: message.role,
+          content: index === messages.length - 1 && message.role === "user" ? messageContent(message, currentAttachments) : message.content,
+        })),
+      ],
       stream: false,
     }),
   });

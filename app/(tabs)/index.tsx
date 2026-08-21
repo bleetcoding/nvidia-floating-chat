@@ -15,8 +15,10 @@ import * as Clipboard from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
 
 import { ScreenContainer } from "@/components/screen-container";
+import { NewChatSetup } from "@/components/new-chat-setup";
 import { attachmentSummary, selectAttachments, toStoredAttachment, type PreparedAttachment } from "@/lib/chat/attachments";
-import { streamChatCompletion, testProviderConnection, testSelectedChatModel } from "@/lib/chat/api";
+import { generatePromptSuggestions, streamChatCompletion, testProviderConnection, testSelectedChatModel } from "@/lib/chat/api";
+import { aiKeyboard } from "@/lib/chat/ai-keyboard";
 import { defaultBubbleAppearance, floatingBubble, type BubbleAppearance } from "@/lib/chat/floating-bubble";
 import {
   loadApiKey,
@@ -25,6 +27,7 @@ import {
   saveApiKey,
   saveConversations,
   saveProviderSettings,
+  syncKeyboardConfiguration,
 } from "@/lib/chat/storage";
 import {
   createConversation,
@@ -88,16 +91,20 @@ export default function HomeScreen() {
   const [showKey, setShowKey] = useState(false);
   const [bubbleEnabled, setBubbleEnabled] = useState(false);
   const [bubbleAppearance, setBubbleAppearance] = useState<BubbleAppearance>(defaultBubbleAppearance);
+  const [showNewChatSetup, setShowNewChatSetup] = useState(false);
+  const [keyboardEnabled, setKeyboardEnabled] = useState(false);
   const hydrated = useRef(false);
 
   useEffect(() => {
-    Promise.all([loadProviderSettings(), loadApiKey(), loadConversations(), floatingBubble.isEnabled(), floatingBubble.getAppearance()])
-      .then(([savedSettings, savedKey, savedConversations, savedBubbleEnabled, savedBubbleAppearance]) => {
+    Promise.all([loadProviderSettings(), loadApiKey(), loadConversations(), floatingBubble.isEnabled(), floatingBubble.getAppearance(), aiKeyboard.isEnabled()])
+      .then(([savedSettings, savedKey, savedConversations, savedBubbleEnabled, savedBubbleAppearance, savedKeyboardEnabled]) => {
         setSettings(savedSettings);
         setApiKey(savedKey);
         setConversations(savedConversations.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
         setBubbleEnabled(savedBubbleEnabled);
         setBubbleAppearance(savedBubbleAppearance);
+        setKeyboardEnabled(savedKeyboardEnabled);
+        void syncKeyboardConfiguration(savedSettings, savedKey);
       })
       .finally(() => {
         hydrated.current = true;
@@ -117,7 +124,7 @@ export default function HomeScreen() {
 
   const saveSettings = async () => {
     const normalized = { ...settings, endpoint: settings.endpoint.trim().replace(/\/+$/, ""), model: settings.model.trim() };
-    await Promise.all([saveProviderSettings(normalized), saveApiKey(apiKey)]);
+    await Promise.all([saveProviderSettings(normalized), saveApiKey(apiKey), syncKeyboardConfiguration(normalized, apiKey)]);
     setSettings(normalized);
     Alert.alert("Saved locally", "Your API key is kept in device secure storage.");
   };
@@ -132,7 +139,7 @@ export default function HomeScreen() {
       setDiscoveredModels(result.models);
       const nextSettings = { ...settings, lastTestedAt: new Date().toISOString() };
       setSettings(nextSettings);
-      await Promise.all([saveProviderSettings(nextSettings), saveApiKey(apiKey)]);
+      await Promise.all([saveProviderSettings(nextSettings), saveApiKey(apiKey), syncKeyboardConfiguration(nextSettings, apiKey)]);
     }
   };
 
@@ -151,14 +158,16 @@ export default function HomeScreen() {
     if (result.ok) {
       const nextSettings = { ...settings, lastVerifiedModel: result.model };
       setSettings(nextSettings);
-      await Promise.all([saveProviderSettings(nextSettings), saveApiKey(apiKey)]);
+      await Promise.all([saveProviderSettings(nextSettings), saveApiKey(apiKey), syncKeyboardConfiguration(nextSettings, apiKey)]);
     }
   };
 
-  const newConversation = () => {
-    const conversation = createConversation();
+  const createNewConversation = (systemInstruction: string) => {
+    const conversation = createConversation(systemInstruction);
     setConversations((current) => [conversation, ...current]);
     setActiveConversationId(conversation.id);
+    if (floatingBubble.isSupported) void floatingBubble.updateOverlayPreview("New conversation", systemInstruction || "Ask anything. This compact view stays above the app you are using.");
+    setShowNewChatSetup(false);
     setScreen("conversation");
   };
 
@@ -173,10 +182,15 @@ export default function HomeScreen() {
         updatedAt: new Date().toISOString(),
       };
     }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+    if (conversationId === activeConversationId && floatingBubble.isSupported) {
+      const latest = messages.at(-1);
+      void floatingBubble.updateOverlayPreview(latest?.role === "assistant" ? "AI response" : "Your message", latest?.content || "Conversation updated.");
+    }
   };
 
   const openConversation = (conversation: Conversation) => {
     setActiveConversationId(conversation.id);
+    if (floatingBubble.isSupported) void floatingBubble.updateOverlayPreview(conversation.title, conversation.messages.at(-1)?.content || conversation.systemInstruction || "No messages yet.");
     setScreen("conversation");
   };
 
@@ -220,6 +234,15 @@ export default function HomeScreen() {
     }
   };
 
+  const openKeyboardSettings = async () => {
+    if (!aiKeyboard.isSupported) {
+      Alert.alert("Android build required", "The Floating AI Keyboard is available in the compiled Android app.");
+      return;
+    }
+    await aiKeyboard.openSettings();
+    setTimeout(() => { void aiKeyboard.isEnabled().then(setKeyboardEnabled); }, 1200);
+  };
+
   if (!isReady) {
     return <ScreenContainer containerClassName="bg-background" className="items-center justify-center"><StatusBar style="light" /><ActivityIndicator size="large" color={colors.primary} /><Text style={styles.loadingText}>Loading your local workspace…</Text></ScreenContainer>;
   }
@@ -227,9 +250,10 @@ export default function HomeScreen() {
   return (
     <ScreenContainer containerClassName="bg-background" className="px-5" edges={["top", "left", "right", "bottom"]}>
       <StatusBar style="light" />
-      {screen === "library" ? <ConversationLibrary conversations={conversations} configured={configured} bubbleEnabled={bubbleEnabled} bubbleAppearance={bubbleAppearance} onCreate={newConversation} onOpen={openConversation} onDelete={deleteConversation} onOpenSettings={() => setScreen("settings")} onToggleBubble={() => void toggleBubble()} onAppearanceChange={(appearance) => void applyBubbleAppearance(appearance)} /> : null}
+      {screen === "library" ? <ConversationLibrary conversations={conversations} configured={configured} bubbleEnabled={bubbleEnabled} bubbleAppearance={bubbleAppearance} onCreate={() => setShowNewChatSetup(true)} onOpen={openConversation} onDelete={deleteConversation} onOpenSettings={() => setScreen("settings")} onToggleBubble={() => void toggleBubble()} onAppearanceChange={(appearance) => void applyBubbleAppearance(appearance)} /> : null}
       {screen === "conversation" ? <ConversationScreen conversation={activeConversation} settings={settings} apiKey={apiKey} configured={configured} onBack={() => setScreen("library")} onOpenSettings={() => setScreen("settings")} onUpdateMessages={updateMessages} /> : null}
-      {screen === "settings" ? <SettingsScreen settings={settings} apiKey={apiKey} showKey={showKey} isTesting={isTesting} result={testResult} isTestingModel={isTestingModel} modelTestResult={modelTestResult} discoveredModels={discoveredModels} onBack={() => setScreen("library")} onSettingsChange={updateSettings} onApiKeyChange={setApiKey} onShowKey={() => setShowKey((current) => !current)} onTest={() => void runTest()} onTestModel={() => void runSelectedModelTest()} onSave={() => void saveSettings()} /> : null}
+      {screen === "settings" ? <SettingsScreen settings={settings} apiKey={apiKey} showKey={showKey} isTesting={isTesting} result={testResult} isTestingModel={isTestingModel} modelTestResult={modelTestResult} discoveredModels={discoveredModels} keyboardEnabled={keyboardEnabled} onBack={() => setScreen("library")} onSettingsChange={updateSettings} onApiKeyChange={setApiKey} onShowKey={() => setShowKey((current) => !current)} onTest={() => void runTest()} onTestModel={() => void runSelectedModelTest()} onKeyboardSettings={() => void openKeyboardSettings()} onSave={() => void saveSettings()} /> : null}
+      <NewChatSetup visible={showNewChatSetup} onClose={() => setShowNewChatSetup(false)} onCreate={createNewConversation} />
     </ScreenContainer>
   );
 }
@@ -252,6 +276,23 @@ function ConversationScreen({ conversation, settings, apiKey, configured, onBack
   const [isStreaming, setIsStreaming] = useState(false);
   const abortController = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  const ideasForMessage = useRef("");
+  const [promptIdeas, setPromptIdeas] = useState<string[]>([]);
+  const [loadingIdeas, setLoadingIdeas] = useState(false);
+
+  useEffect(() => {
+    const lastMessage = conversation?.messages.at(-1);
+    if (!conversation || !configured || isStreaming || !lastMessage || lastMessage.role !== "assistant" || !lastMessage.content || lastMessage.content.startsWith("I could not")) return;
+    if (ideasForMessage.current === lastMessage.id) return;
+    ideasForMessage.current = lastMessage.id;
+    const controller = new AbortController();
+    setLoadingIdeas(true);
+    void generatePromptSuggestions({ settings, apiKey, messages: conversation.messages, systemInstruction: conversation.systemInstruction, signal: controller.signal })
+      .then(setPromptIdeas)
+      .catch(() => setPromptIdeas([]))
+      .finally(() => setLoadingIdeas(false));
+    return () => controller.abort();
+  }, [apiKey, configured, conversation, isStreaming, settings]);
 
   const pickAttachments = async () => {
     try {
@@ -279,7 +320,7 @@ function ConversationScreen({ conversation, settings, apiKey, configured, onBack
     abortController.current = controller;
     let response = "";
     try {
-      await streamChatCompletion({ settings, apiKey, messages: [...conversation.messages, userMessage], currentAttachments: pendingAttachments, signal: controller.signal, onDelta: (delta: string) => { response += delta; onUpdateMessages(conversation.id, [...conversation.messages, userMessage, { ...assistantMessage, content: response }]); } });
+      await streamChatCompletion({ settings, apiKey, messages: [...conversation.messages, userMessage], currentAttachments: pendingAttachments, systemInstruction: conversation.systemInstruction, signal: controller.signal, onDelta: (delta: string) => { response += delta; onUpdateMessages(conversation.id, [...conversation.messages, userMessage, { ...assistantMessage, content: response }]); } });
       if (!response) onUpdateMessages(conversation.id, [...conversation.messages, userMessage, { ...assistantMessage, content: "The model completed without returning text." }]);
     } catch (error) {
       const message = error instanceof Error && error.name === "AbortError" ? `${response || "Response"} [stopped]` : `I could not complete that request: ${error instanceof Error ? error.message : "Unknown provider error"}`;
@@ -289,9 +330,10 @@ function ConversationScreen({ conversation, settings, apiKey, configured, onBack
 
   if (!conversation) return <View style={styles.flex}><TouchableOpacity accessibilityLabel="Back to conversations" onPress={onBack} style={styles.backButton}><Text style={styles.backText}>‹</Text></TouchableOpacity></View>;
   return <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-    <View style={styles.headerRow}><TouchableOpacity accessibilityLabel="Back to conversations" onPress={onBack} style={styles.backButton}><Text style={styles.backText}>‹</Text></TouchableOpacity><View style={styles.flex}><Text numberOfLines={1} style={styles.conversationHeading}>{conversation.title}</Text><Text style={styles.conversationSubheading}>{isStreaming ? "Streaming response…" : "Local conversation memory"}</Text></View><TouchableOpacity accessibilityLabel="Open connection settings" onPress={onOpenSettings} style={styles.iconButton}><Text style={styles.iconButtonText}>⚙</Text></TouchableOpacity></View>
+    <View style={styles.headerRow}><TouchableOpacity accessibilityLabel="Back to conversations" onPress={onBack} style={styles.backButton}><Text style={styles.backText}>‹</Text></TouchableOpacity><View style={styles.flex}><Text numberOfLines={1} style={styles.conversationHeading}>{conversation.title}</Text><Text style={styles.conversationSubheading}>{isStreaming ? "Getting response…" : conversation.systemInstruction ? "Conversation instruction active" : "Local conversation memory"}</Text></View><TouchableOpacity accessibilityLabel="Open connection settings" onPress={onOpenSettings} style={styles.iconButton}><Text style={styles.iconButtonText}>⚙</Text></TouchableOpacity></View>
     {!configured ? <TouchableOpacity onPress={onOpenSettings} style={styles.inlineSetup}><Text style={styles.inlineSetupText}>Configure a model to start chatting  →</Text></TouchableOpacity> : null}
     <FlatList ref={listRef} data={conversation.messages} keyExtractor={(item) => item.id} style={styles.messageList} contentContainerStyle={conversation.messages.length ? styles.messageListContent : styles.messageEmpty} onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })} renderItem={({ item, index }) => <MessageCard message={item} onCopy={() => void copyMessage(item)} onEdit={item.role === "user" ? () => setDraft(item.content) : undefined} onResend={item.role === "assistant" ? () => { const previous = conversation.messages.slice(0, index).reverse().find((message) => message.role === "user"); if (previous) void send(previous.content); } : undefined} />} ListEmptyComponent={<View style={styles.emptyState}><View style={styles.emptyOrbit}><Text style={styles.emptyOrbitText}>✦</Text></View><Text style={styles.emptyTitle}>What can I help with?</Text><Text style={styles.emptyText}>Messages are saved locally on this device. AI text stays selectable and easy to copy.</Text></View>} />
+    {loadingIdeas || promptIdeas.length ? <View style={promptIdeaStyles.panel}><Text style={promptIdeaStyles.label}>{loadingIdeas ? "THINKING OF NEXT IDEAS…" : "IDEAS FOR WHAT TO ASK NEXT"}</Text>{promptIdeas.length ? <FlatList horizontal data={promptIdeas} keyExtractor={(item, index) => `${index}-${item}`} contentContainerStyle={promptIdeaStyles.list} renderItem={({ item }) => <TouchableOpacity accessibilityLabel={`Use suggested prompt ${item}`} onPress={() => setDraft(item)} style={promptIdeaStyles.chip}><Text numberOfLines={2} style={promptIdeaStyles.text}>{item}</Text></TouchableOpacity>} /> : <Text style={promptIdeaStyles.loadingText}>Reading this conversation in the background…</Text>}</View> : null}
     {attachments.length ? <View style={styles.attachmentStrip}>{attachments.map((attachment) => <View key={attachment.id} style={styles.attachmentChip}><Text numberOfLines={1} style={styles.attachmentLabel}>{attachmentSummary(attachment)} · {attachment.name}</Text><TouchableOpacity accessibilityLabel={`Remove ${attachment.name}`} onPress={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}><Text style={styles.attachmentRemove}>×</Text></TouchableOpacity></View>)}</View> : null}
     <View style={styles.composer}><TouchableOpacity accessibilityLabel="Attach file" disabled={isStreaming} onPress={() => void pickAttachments()} style={styles.attachButton}><Text style={styles.attachButtonText}>＋</Text></TouchableOpacity><TextInput accessibilityLabel="Message" editable={!isStreaming} multiline value={draft} onChangeText={setDraft} placeholder={configured ? "Message the model…" : "Configure your model to begin"} placeholderTextColor={colors.muted} style={styles.composerInput} /><TouchableOpacity accessibilityLabel={isStreaming ? "Stop response" : "Send message"} onPress={isStreaming ? stopStreaming : () => void send()} style={[styles.sendButton, isStreaming && styles.stopButton]}><Text style={styles.sendButtonText}>{isStreaming ? "■" : "↑"}</Text></TouchableOpacity></View>
   </KeyboardAvoidingView>;
@@ -302,7 +344,7 @@ function MessageCard({ message, onCopy, onEdit, onResend }: { message: ChatMessa
   return <View style={[styles.messageWrap, isUser ? styles.messageWrapUser : styles.messageWrapAssistant]}><View style={[styles.messageBubble, isUser ? styles.userBubble : styles.assistantBubble]}>{message.content ? <Text selectable style={[styles.messageText, isUser ? styles.userText : styles.assistantText]}>{message.content}</Text> : <View style={styles.typingRow}><View style={styles.typingDot} /><View style={styles.typingDot} /><View style={styles.typingDot} /></View>}{message.attachments?.length ? <View style={styles.sentAttachments}>{message.attachments.map((attachment) => <Text key={attachment.id} style={styles.sentAttachmentText}>⌁ {attachmentSummary(attachment)}: {attachment.name}</Text>)}</View> : null}</View><View style={styles.messageActions}><TouchableOpacity accessibilityLabel="Copy message" onPress={onCopy}><Text style={styles.messageActionText}>Copy</Text></TouchableOpacity>{onEdit ? <TouchableOpacity accessibilityLabel="Edit message" onPress={onEdit}><Text style={styles.messageActionText}>Edit</Text></TouchableOpacity> : null}{onResend ? <TouchableOpacity accessibilityLabel="Regenerate response" onPress={onResend}><Text style={styles.messageActionText}>Retry</Text></TouchableOpacity> : null}</View></View>;
 }
 
-function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestingModel, modelTestResult, discoveredModels, onBack, onSettingsChange, onApiKeyChange, onShowKey, onTest, onTestModel, onSave }: { settings: ProviderSettings; apiKey: string; showKey: boolean; isTesting: boolean; result: ProviderTestResult | null; isTestingModel: boolean; modelTestResult: SelectedModelTestResult | null; discoveredModels: string[]; onBack: () => void; onSettingsChange: (settings: ProviderSettings) => void; onApiKeyChange: (apiKey: string) => void; onShowKey: () => void; onTest: () => void; onTestModel: () => void; onSave: () => void }) {
+function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestingModel, modelTestResult, discoveredModels, keyboardEnabled, onBack, onSettingsChange, onApiKeyChange, onShowKey, onTest, onTestModel, onKeyboardSettings, onSave }: { settings: ProviderSettings; apiKey: string; showKey: boolean; isTesting: boolean; result: ProviderTestResult | null; isTestingModel: boolean; modelTestResult: SelectedModelTestResult | null; discoveredModels: string[]; keyboardEnabled: boolean; onBack: () => void; onSettingsChange: (settings: ProviderSettings) => void; onApiKeyChange: (apiKey: string) => void; onShowKey: () => void; onTest: () => void; onTestModel: () => void; onKeyboardSettings: () => void; onSave: () => void }) {
   const [modelSearch, setModelSearch] = useState("");
   const matchingModels = discoveredModels.filter((model) => model.toLowerCase().includes(modelSearch.trim().toLowerCase()));
 
@@ -314,6 +356,7 @@ function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestin
       <View style={styles.fieldHeader}><Text style={styles.fieldLabel}>Model identifier</Text>{settings.lastVerifiedModel === settings.model ? <Text style={styles.testedAt}>Chat tested ✓</Text> : settings.lastTestedAt ? <Text style={styles.testedAt}>Catalog refreshed {dateLabel(settings.lastTestedAt)}</Text> : null}</View><TextInput accessibilityLabel="Model identifier" autoCapitalize="none" autoCorrect={false} value={settings.model} onChangeText={(model) => onSettingsChange({ ...settings, model })} placeholder="Refresh catalog or enter a model ID" placeholderTextColor={colors.muted} style={styles.input} /><TouchableOpacity accessibilityLabel="Test selected model" disabled={isTestingModel} onPress={onTestModel} style={[styles.testButton, isTestingModel && styles.buttonDisabled]}>{isTestingModel ? <ActivityIndicator color={colors.text} /> : <Text style={styles.testButtonText}>Test selected model</Text>}</TouchableOpacity>{modelTestResult ? <View style={[styles.resultCard, modelTestResult.ok ? styles.resultSuccess : styles.resultError]}><Text style={[styles.resultHeading, modelTestResult.ok ? styles.resultHeadingSuccess : styles.resultHeadingError]}>{modelTestResult.ok ? "Selected chat model works" : "Selected model is not usable for chat"}</Text><Text style={styles.resultMessage}>{modelTestResult.message}</Text></View> : null}
       {discoveredModels.length ? <View style={styles.modelList}><Text style={styles.discoveredLabel}>LIVE MODEL CATALOG · {discoveredModels.length}</Text><Text style={styles.helperText}>The provider returns models for several tasks. Select one, then use Test selected model; only a passing chat test enables messages.</Text><TextInput accessibilityLabel="Search live model catalog" autoCapitalize="none" autoCorrect={false} value={modelSearch} onChangeText={setModelSearch} placeholder="Search model IDs" placeholderTextColor={colors.muted} style={styles.input} />{matchingModels.length ? matchingModels.map((model) => <TouchableOpacity key={model} accessibilityLabel={`Select model ${model}`} onPress={() => onSettingsChange({ ...settings, model })} style={[styles.modelChip, settings.model === model && styles.modelChipSelected]}><Text numberOfLines={1} style={[styles.modelChipText, settings.model === model && styles.modelChipTextSelected]}>{model}</Text></TouchableOpacity>) : <Text style={styles.helperText}>No live model IDs match this search.</Text>}</View> : null}
       <TouchableOpacity accessibilityLabel="Refresh live model catalog" disabled={isTesting} onPress={onTest} style={[styles.testButton, isTesting && styles.buttonDisabled]}>{isTesting ? <ActivityIndicator color={colors.text} /> : <Text style={styles.testButtonText}>Refresh live model catalog</Text>}</TouchableOpacity>{result ? <View style={[styles.resultCard, result.ok ? styles.resultSuccess : styles.resultError]}><Text style={[styles.resultHeading, result.ok ? styles.resultHeadingSuccess : styles.resultHeadingError]}>{result.ok ? "Connection verified" : "Connection not verified"}</Text><Text style={styles.resultMessage}>{result.message}</Text></View> : null}
+      <View style={keyboardStyles.card}><View style={keyboardStyles.heading}><View style={styles.flex}><Text style={styles.privacyTitle}>Floating AI Keyboard</Text><Text style={styles.privacyText}>{keyboardEnabled ? "Enabled in Android. Select it from your keyboard switcher to use rewrites and grammar fixes." : "Enable it in Android settings after saving a tested model. It never processes password or PIN fields."}</Text></View><View style={[keyboardStyles.status, keyboardEnabled && keyboardStyles.statusOn]}><Text style={keyboardStyles.statusText}>{keyboardEnabled ? "ON" : "SET UP"}</Text></View></View><TouchableOpacity accessibilityLabel="Open Android keyboard settings" onPress={onKeyboardSettings} style={keyboardStyles.button}><Text style={keyboardStyles.buttonText}>Open keyboard settings</Text></TouchableOpacity></View>
       <View style={styles.privacyCard}><Text style={styles.privacyTitle}>Privacy checkpoint</Text><Text style={styles.privacyText}>Refreshing the catalog sends only an authenticated request to the provider’s model list. Messages and chosen attachments are sent only when you press Send.</Text></View>
     </View>} ListFooterComponent={<TouchableOpacity accessibilityLabel="Save provider settings" onPress={onSave} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Save connection settings</Text></TouchableOpacity>} />
   </View>;
@@ -321,6 +364,25 @@ function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestin
 
 const styles = StyleSheet.create({
   flex: { flex: 1 }, loadingText: { color: colors.muted, fontSize: 15, marginTop: 14 }, headerRow: { alignItems: "center", flexDirection: "row", gap: 12, marginBottom: 22, marginTop: 4 }, eyebrow: { color: colors.lime, fontSize: 10, fontWeight: "800", letterSpacing: 1.6, marginBottom: 5 }, pageTitle: { color: colors.text, fontSize: 27, fontWeight: "800", letterSpacing: -0.6 }, headerDetail: { color: colors.muted, fontSize: 12, marginTop: 3 }, iconButton: { alignItems: "center", backgroundColor: colors.elevated, borderColor: colors.border, borderRadius: 16, borderWidth: 1, height: 46, justifyContent: "center", width: 46 }, iconButtonText: { color: colors.text, fontSize: 20 }, statusCard: { alignItems: "center", borderRadius: 19, flexDirection: "row", gap: 10, marginBottom: 23, padding: 15 }, statusOnline: { backgroundColor: "#172719", borderColor: "#396534", borderWidth: 1 }, statusAttention: { backgroundColor: "#21281A", borderColor: "#59632D", borderWidth: 1 }, statusDot: { backgroundColor: colors.lime, borderRadius: 4, height: 8, width: 8 }, statusTitle: { color: colors.text, fontSize: 14, fontWeight: "800", marginBottom: 3 }, statusDetail: { color: colors.muted, fontSize: 12, lineHeight: 17 }, statusAction: { backgroundColor: colors.primary, borderRadius: 12, marginLeft: 2, paddingHorizontal: 11, paddingVertical: 8 }, statusActionText: { color: "#081000", fontSize: 12, fontWeight: "800" }, sectionHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 }, sectionTitle: { color: colors.muted, fontSize: 12, fontWeight: "800", letterSpacing: 1.1, textTransform: "uppercase" }, sectionCount: { color: colors.muted, fontSize: 12 }, listContent: { gap: 10, paddingBottom: 100 }, emptyContent: { flexGrow: 1, justifyContent: "center", paddingBottom: 110 }, conversationCard: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, padding: 13 }, conversationGlyph: { alignItems: "center", backgroundColor: "#21331C", borderRadius: 14, height: 44, justifyContent: "center", width: 44 }, conversationGlyphText: { color: colors.lime, fontSize: 19 }, conversationTitle: { color: colors.text, fontSize: 15, fontWeight: "700", marginBottom: 4 }, conversationPreview: { color: colors.muted, fontSize: 12 }, conversationMeta: { alignItems: "flex-end", gap: 3 }, dateText: { color: colors.muted, fontSize: 10 }, deleteButton: { alignItems: "center", height: 23, justifyContent: "center", width: 23 }, deleteButtonText: { color: colors.muted, fontSize: 22, lineHeight: 22 }, emptyState: { alignItems: "center", paddingHorizontal: 26 }, emptyOrbit: { alignItems: "center", backgroundColor: "#1C2A17", borderColor: "#416F31", borderRadius: 46, borderWidth: 1, height: 92, justifyContent: "center", marginBottom: 18, width: 92 }, emptyOrbitText: { color: colors.lime, fontSize: 37 }, emptyTitle: { color: colors.text, fontSize: 21, fontWeight: "800", marginBottom: 9 }, emptyText: { color: colors.muted, fontSize: 14, lineHeight: 21, textAlign: "center" }, primaryButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 17, justifyContent: "center", marginBottom: Platform.OS === "web" ? 8 : 3, minHeight: 56 }, primaryButtonText: { color: "#081000", fontSize: 16, fontWeight: "900" }, backButton: { alignItems: "center", backgroundColor: colors.elevated, borderColor: colors.border, borderRadius: 16, borderWidth: 1, height: 46, justifyContent: "center", width: 46 }, backText: { color: colors.text, fontSize: 34, fontWeight: "300", marginTop: -5 }, conversationHeading: { color: colors.text, fontSize: 18, fontWeight: "800" }, conversationSubheading: { color: colors.muted, fontSize: 11, marginTop: 3 }, inlineSetup: { backgroundColor: "#21281A", borderColor: "#59632D", borderRadius: 13, borderWidth: 1, marginBottom: 12, padding: 11 }, inlineSetupText: { color: colors.lime, fontSize: 12, fontWeight: "800", textAlign: "center" }, messageList: { flex: 1 }, messageListContent: { gap: 15, paddingBottom: 16 }, messageEmpty: { flexGrow: 1, justifyContent: "center", paddingBottom: 55 }, messageWrap: { maxWidth: "91%" }, messageWrapUser: { alignSelf: "flex-end" }, messageWrapAssistant: { alignSelf: "flex-start" }, messageBubble: { borderRadius: 19, paddingHorizontal: 14, paddingVertical: 12 }, userBubble: { backgroundColor: "#3C681B", borderBottomRightRadius: 5 }, assistantBubble: { backgroundColor: colors.surface, borderBottomLeftRadius: 5, borderColor: colors.border, borderWidth: 1 }, messageText: { fontSize: 14, lineHeight: 21 }, userText: { color: "#FFFFFF" }, assistantText: { color: colors.text }, messageActions: { flexDirection: "row", gap: 13, marginHorizontal: 4, marginTop: 5 }, messageActionText: { color: colors.muted, fontSize: 11, fontWeight: "700" }, typingRow: { flexDirection: "row", gap: 5, minHeight: 20, paddingTop: 3 }, typingDot: { backgroundColor: colors.lime, borderRadius: 3, height: 6, width: 6 }, sentAttachments: { borderTopColor: "rgba(255,255,255,0.2)", borderTopWidth: 1, gap: 3, marginTop: 9, paddingTop: 8 }, sentAttachmentText: { color: "#E5F6D2", fontSize: 11 }, attachmentStrip: { gap: 6, marginBottom: 8 }, attachmentChip: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#21331C", borderColor: "#416F31", borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, maxWidth: "100%", paddingHorizontal: 10, paddingVertical: 7 }, attachmentLabel: { color: colors.lime, fontSize: 11, maxWidth: 250 }, attachmentRemove: { color: colors.text, fontSize: 18, lineHeight: 16 }, composer: { alignItems: "flex-end", backgroundColor: colors.elevated, borderColor: colors.border, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 7, marginBottom: 3, padding: 7 }, attachButton: { alignItems: "center", backgroundColor: colors.surface, borderRadius: 14, height: 38, justifyContent: "center", width: 38 }, attachButtonText: { color: colors.lime, fontSize: 23, lineHeight: 25 }, composerInput: { color: colors.text, flex: 1, fontSize: 14, maxHeight: 110, minHeight: 40, paddingHorizontal: 5, paddingTop: 10 }, sendButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 14, height: 38, justifyContent: "center", width: 38 }, stopButton: { backgroundColor: colors.danger }, sendButtonText: { color: "#081000", fontSize: 21, fontWeight: "900", lineHeight: 22 }, settingsContent: { paddingBottom: 21 }, fieldLabel: { color: colors.text, fontSize: 14, fontWeight: "800", marginBottom: 8, marginTop: 18 }, input: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 15, borderWidth: 1, color: colors.text, fontSize: 14, minHeight: 52, paddingHorizontal: 14 }, helperText: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 7 }, keyRow: { flexDirection: "row", gap: 8 }, keyInput: { flex: 1 }, revealButton: { alignItems: "center", backgroundColor: colors.elevated, borderColor: colors.border, borderRadius: 14, borderWidth: 1, justifyContent: "center", paddingHorizontal: 13 }, revealButtonText: { color: colors.lime, fontSize: 12, fontWeight: "800" }, fieldHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, testedAt: { color: colors.muted, fontSize: 11, marginTop: 18 }, modelList: { marginTop: 13 }, discoveredLabel: { color: colors.muted, fontSize: 10, fontWeight: "800", letterSpacing: 1.2, marginBottom: 8 }, modelChip: { backgroundColor: colors.elevated, borderColor: colors.border, borderRadius: 12, borderWidth: 1, marginBottom: 7, paddingHorizontal: 12, paddingVertical: 10 }, modelChipSelected: { backgroundColor: "#263D1E", borderColor: colors.primary }, modelChipText: { color: colors.muted, fontSize: 12 }, modelChipTextSelected: { color: colors.lime, fontWeight: "800" }, testButton: { alignItems: "center", backgroundColor: "#2F4031", borderRadius: 15, justifyContent: "center", marginTop: 22, minHeight: 52 }, testButtonText: { color: colors.text, fontSize: 15, fontWeight: "800" }, buttonDisabled: { opacity: 0.65 }, resultCard: { borderRadius: 15, marginTop: 12, padding: 13 }, resultSuccess: { backgroundColor: "#173016", borderColor: "#3E7537", borderWidth: 1 }, resultError: { backgroundColor: "#351C19", borderColor: "#9B453B", borderWidth: 1 }, resultHeading: { fontSize: 13, fontWeight: "800", marginBottom: 4 }, resultHeadingSuccess: { color: colors.lime }, resultHeadingError: { color: "#FF9A8F" }, resultMessage: { color: colors.text, fontSize: 12, lineHeight: 18 }, privacyCard: { backgroundColor: "#101C17", borderColor: colors.border, borderRadius: 16, borderWidth: 1, marginTop: 23, padding: 15 }, privacyTitle: { color: colors.text, fontSize: 13, fontWeight: "800", marginBottom: 6 }, privacyText: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+});
+
+const promptIdeaStyles = StyleSheet.create({
+  panel: { backgroundColor: "#101C17", borderColor: colors.border, borderRadius: 15, borderWidth: 1, marginBottom: 8, padding: 10 },
+  label: { color: colors.muted, fontSize: 10, fontWeight: "800", letterSpacing: 0.9, marginBottom: 8 },
+  list: { gap: 8, paddingRight: 10 },
+  chip: { backgroundColor: "#1D3215", borderColor: "#4A762B", borderRadius: 13, borderWidth: 1, maxWidth: 235, minHeight: 48, paddingHorizontal: 11, paddingVertical: 9 },
+  text: { color: colors.lime, fontSize: 12, lineHeight: 17 },
+  loadingText: { color: colors.muted, fontSize: 12, paddingBottom: 2 },
+});
+
+const keyboardStyles = StyleSheet.create({
+  card: { backgroundColor: "#101C17", borderColor: "#426B2B", borderRadius: 16, borderWidth: 1, marginTop: 23, padding: 15 },
+  heading: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  status: { backgroundColor: "#364238", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 5 },
+  statusOn: { backgroundColor: "#3C681B" },
+  statusText: { color: colors.text, fontSize: 9, fontWeight: "900", letterSpacing: 0.7 },
+  button: { alignItems: "center", borderColor: colors.primary, borderRadius: 12, borderWidth: 1, marginTop: 13, minHeight: 43, justifyContent: "center" },
+  buttonText: { color: colors.lime, fontSize: 13, fontWeight: "800" },
 });
 
 const bubbleStyles = StyleSheet.create({
