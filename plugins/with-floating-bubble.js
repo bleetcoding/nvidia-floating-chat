@@ -70,6 +70,7 @@ import android.widget.TextView;
 public class FloatingBubbleService extends Service {
   private static final String CHANNEL_ID = "floating_chat_channel";
   private static final int NOTIFICATION_ID = 742;
+  private static final String ACTION_REFRESH = "${packageName}.REFRESH_FLOATING_BUBBLE";
   private WindowManager windowManager;
   private TextView bubble;
   private WindowManager.LayoutParams layoutParams;
@@ -81,7 +82,14 @@ public class FloatingBubbleService extends Service {
     showBubble();
   }
 
-  @Override public int onStartCommand(Intent intent, int flags, int startId) { return START_STICKY; }
+  @Override public int onStartCommand(Intent intent, int flags, int startId) {
+    if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && bubble != null && windowManager != null) {
+      windowManager.removeView(bubble);
+      bubble = null;
+      showBubble();
+    }
+    return START_STICKY;
+  }
 
   private Notification createNotification() {
     Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("${scheme}://chat"));
@@ -114,10 +122,10 @@ public class FloatingBubbleService extends Service {
     bubble.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
     GradientDrawable background = new GradientDrawable();
     background.setShape(GradientDrawable.OVAL);
-    background.setColor(Color.rgb(118, 185, 0));
+    background.setColor(Color.parseColor(preferences().getString("color", "#76B900")));
     background.setStroke(2, Color.rgb(181, 232, 83));
     bubble.setBackground(background);
-    final int size = dp(58);
+    final int size = dp(preferences().getInt("sizeDp", 58));
     layoutParams = new WindowManager.LayoutParams(size, size, Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT);
     layoutParams.gravity = Gravity.TOP | Gravity.START;
     layoutParams.x = dp(18);
@@ -154,6 +162,7 @@ public class FloatingBubbleService extends Service {
   }
 
   private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
+  private android.content.SharedPreferences preferences() { return getSharedPreferences("floating_bubble", 0); }
   @Override public void onDestroy() { if (bubble != null && windowManager != null) windowManager.removeView(bubble); super.onDestroy(); }
   @Override public IBinder onBind(Intent intent) { return null; }
 }`;
@@ -163,16 +172,32 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.WritableMap;
 
 public class FloatingBubbleModule extends ReactContextBaseJavaModule {
   FloatingBubbleModule(ReactApplicationContext context) { super(context); }
   @Override public String getName() { return "FloatingBubble"; }
   @ReactMethod public void isOverlayPermissionGranted(Promise promise) { promise.resolve(Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(getReactApplicationContext())); }
   @ReactMethod public void isBubbleEnabled(Promise promise) { promise.resolve(getReactApplicationContext().getSharedPreferences("floating_bubble", 0).getBoolean("enabled", false)); }
+  @ReactMethod public void getAppearance(Promise promise) {
+    android.content.SharedPreferences preferences = getReactApplicationContext().getSharedPreferences("floating_bubble", 0);
+    WritableMap appearance = Arguments.createMap(); appearance.putInt("sizeDp", preferences.getInt("sizeDp", 58)); appearance.putString("color", preferences.getString("color", "#76B900")); promise.resolve(appearance);
+  }
+  @ReactMethod public void updateAppearance(double sizeDp, String color, Promise promise) {
+    if (color == null || !color.matches("^#[0-9A-Fa-f]{6}$")) { promise.reject("INVALID_BUBBLE_COLOR", "Bubble color must be a six-digit hex color."); return; }
+    int normalizedSize = Math.max(42, Math.min(92, (int) Math.round(sizeDp)));
+    android.content.SharedPreferences preferences = getReactApplicationContext().getSharedPreferences("floating_bubble", 0);
+    preferences.edit().putInt("sizeDp", normalizedSize).putString("color", color.toUpperCase()).apply();
+    if (preferences.getBoolean("enabled", false)) {
+      Intent refresh = new Intent(getReactApplicationContext(), FloatingBubbleService.class); refresh.setAction("${packageName}.REFRESH_FLOATING_BUBBLE"); getReactApplicationContext().startService(refresh);
+    }
+    promise.resolve(true);
+  }
   @ReactMethod public void requestOverlayPermission(Promise promise) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(getReactApplicationContext())) { promise.resolve(true); return; }
     Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getReactApplicationContext().getPackageName()));

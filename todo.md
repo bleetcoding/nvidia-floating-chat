@@ -14,3 +14,4 @@
 - [x] Add deterministic tests, type-checking, and lint validation
 - [x] Create a public GitHub repository and push the completed source
 - [x] Investigate and fix the Android launch crash in the published APK
+- [x] Add persistent floating-bubble size and color customization controls

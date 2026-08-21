@@ -17,7 +17,7 @@ import { StatusBar } from "expo-status-bar";
 import { ScreenContainer } from "@/components/screen-container";
 import { attachmentSummary, selectAttachments, toStoredAttachment, type PreparedAttachment } from "@/lib/chat/attachments";
 import { streamChatCompletion, testProviderConnection } from "@/lib/chat/api";
-import { floatingBubble } from "@/lib/chat/floating-bubble";
+import { defaultBubbleAppearance, floatingBubble, type BubbleAppearance } from "@/lib/chat/floating-bubble";
 import {
   loadApiKey,
   loadConversations,
@@ -49,6 +49,20 @@ const colors = {
   danger: "#FF7262",
 };
 
+const BUBBLE_SIZES = [
+  { label: "Small", sizeDp: 48 },
+  { label: "Standard", sizeDp: 58 },
+  { label: "Large", sizeDp: 72 },
+];
+
+const BUBBLE_COLORS = [
+  { label: "NVIDIA green", value: "#76B900" },
+  { label: "Sky", value: "#42A5F5" },
+  { label: "Violet", value: "#A78BFA" },
+  { label: "Coral", value: "#FF7262" },
+  { label: "Amber", value: "#F5B942" },
+];
+
 function dateLabel(iso: string): string {
   const date = new Date(iso);
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
@@ -70,15 +84,17 @@ export default function HomeScreen() {
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [showKey, setShowKey] = useState(false);
   const [bubbleEnabled, setBubbleEnabled] = useState(false);
+  const [bubbleAppearance, setBubbleAppearance] = useState<BubbleAppearance>(defaultBubbleAppearance);
   const hydrated = useRef(false);
 
   useEffect(() => {
-    Promise.all([loadProviderSettings(), loadApiKey(), loadConversations(), floatingBubble.isEnabled()])
-      .then(([savedSettings, savedKey, savedConversations, savedBubbleEnabled]) => {
+    Promise.all([loadProviderSettings(), loadApiKey(), loadConversations(), floatingBubble.isEnabled(), floatingBubble.getAppearance()])
+      .then(([savedSettings, savedKey, savedConversations, savedBubbleEnabled, savedBubbleAppearance]) => {
         setSettings(savedSettings);
         setApiKey(savedKey);
         setConversations(savedConversations.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
         setBubbleEnabled(savedBubbleEnabled);
+        setBubbleAppearance(savedBubbleAppearance);
       })
       .finally(() => {
         hydrated.current = true;
@@ -172,6 +188,16 @@ export default function HomeScreen() {
     }
   };
 
+  const applyBubbleAppearance = async (appearance: BubbleAppearance) => {
+    setBubbleAppearance(appearance);
+    if (!floatingBubble.isSupported) return;
+    try {
+      await floatingBubble.updateAppearance(appearance);
+    } catch (error) {
+      Alert.alert("Appearance could not update", error instanceof Error ? error.message : "Try another bubble size or color.");
+    }
+  };
+
   if (!isReady) {
     return <ScreenContainer containerClassName="bg-background" className="items-center justify-center"><StatusBar style="light" /><ActivityIndicator size="large" color={colors.primary} /><Text style={styles.loadingText}>Loading your local workspace…</Text></ScreenContainer>;
   }
@@ -179,18 +205,19 @@ export default function HomeScreen() {
   return (
     <ScreenContainer containerClassName="bg-background" className="px-5" edges={["top", "left", "right", "bottom"]}>
       <StatusBar style="light" />
-      {screen === "library" ? <ConversationLibrary conversations={conversations} configured={configured} bubbleEnabled={bubbleEnabled} onCreate={newConversation} onOpen={openConversation} onDelete={deleteConversation} onOpenSettings={() => setScreen("settings")} onToggleBubble={() => void toggleBubble()} /> : null}
+      {screen === "library" ? <ConversationLibrary conversations={conversations} configured={configured} bubbleEnabled={bubbleEnabled} bubbleAppearance={bubbleAppearance} onCreate={newConversation} onOpen={openConversation} onDelete={deleteConversation} onOpenSettings={() => setScreen("settings")} onToggleBubble={() => void toggleBubble()} onAppearanceChange={(appearance) => void applyBubbleAppearance(appearance)} /> : null}
       {screen === "conversation" ? <ConversationScreen conversation={activeConversation} settings={settings} apiKey={apiKey} configured={configured} onBack={() => setScreen("library")} onOpenSettings={() => setScreen("settings")} onUpdateMessages={updateMessages} /> : null}
       {screen === "settings" ? <SettingsScreen settings={settings} apiKey={apiKey} showKey={showKey} isTesting={isTesting} result={testResult} discoveredModels={discoveredModels} onBack={() => setScreen("library")} onSettingsChange={setSettings} onApiKeyChange={setApiKey} onShowKey={() => setShowKey((current) => !current)} onTest={() => void runTest()} onSave={() => void saveSettings()} /> : null}
     </ScreenContainer>
   );
 }
 
-function ConversationLibrary({ conversations, configured, bubbleEnabled, onCreate, onOpen, onDelete, onOpenSettings, onToggleBubble }: { conversations: Conversation[]; configured: boolean; bubbleEnabled: boolean; onCreate: () => void; onOpen: (conversation: Conversation) => void; onDelete: (conversation: Conversation) => void; onOpenSettings: () => void; onToggleBubble: () => void }) {
+function ConversationLibrary({ conversations, configured, bubbleEnabled, bubbleAppearance, onCreate, onOpen, onDelete, onOpenSettings, onToggleBubble, onAppearanceChange }: { conversations: Conversation[]; configured: boolean; bubbleEnabled: boolean; bubbleAppearance: BubbleAppearance; onCreate: () => void; onOpen: (conversation: Conversation) => void; onDelete: (conversation: Conversation) => void; onOpenSettings: () => void; onToggleBubble: () => void; onAppearanceChange: (appearance: BubbleAppearance) => void }) {
   return <View style={styles.flex}>
     <View style={styles.headerRow}><View><Text style={styles.eyebrow}>NVIDIA FLOATING CHAT</Text><Text style={styles.pageTitle}>Your conversations</Text></View><TouchableOpacity accessibilityLabel="Open connection settings" onPress={onOpenSettings} style={styles.iconButton}><Text style={styles.iconButtonText}>⚙</Text></TouchableOpacity></View>
     <View style={[styles.statusCard, configured ? styles.statusOnline : styles.statusAttention]}><View style={styles.statusDot} /><View style={styles.flex}><Text style={styles.statusTitle}>{configured ? "Ready to chat" : "Finish connection setup"}</Text><Text style={styles.statusDetail}>{configured ? "Your endpoint, model, and secure API key are configured on this device." : "Add an API key, test the provider, and choose a model before sending a message."}</Text></View>{!configured ? <TouchableOpacity accessibilityLabel="Configure connection" onPress={onOpenSettings} style={styles.statusAction}><Text style={styles.statusActionText}>Set up</Text></TouchableOpacity> : null}</View>
     <View style={bubbleStyles.card}><View style={bubbleStyles.badge}><Text style={bubbleStyles.badgeText}>AI</Text></View><View style={styles.flex}><Text style={bubbleStyles.title}>Display over other apps</Text><Text style={bubbleStyles.detail}>{bubbleEnabled ? "The movable bubble stays available while the app is backgrounded." : "Turn on a movable bubble for instant chat access above other apps."}</Text></View><TouchableOpacity accessibilityLabel={bubbleEnabled ? "Turn off floating bubble" : "Turn on floating bubble"} onPress={onToggleBubble} style={[bubbleStyles.toggle, bubbleEnabled && bubbleStyles.toggleOn]}><View style={[bubbleStyles.knob, bubbleEnabled && bubbleStyles.knobOn]} /></TouchableOpacity></View>
+    <View style={appearanceStyles.panel}><View style={appearanceStyles.headingRow}><View style={styles.flex}><Text style={appearanceStyles.title}>Bubble appearance</Text><Text style={appearanceStyles.detail}>Changes are saved and apply immediately when the bubble is active.</Text></View><View style={[appearanceStyles.preview, { backgroundColor: bubbleAppearance.color, height: bubbleAppearance.sizeDp * 0.55, width: bubbleAppearance.sizeDp * 0.55 }]}><Text style={appearanceStyles.previewText}>AI</Text></View></View><Text style={appearanceStyles.label}>SIZE · {bubbleAppearance.sizeDp} DP</Text><View style={appearanceStyles.sizeRow}>{BUBBLE_SIZES.map((option) => <TouchableOpacity key={option.sizeDp} accessibilityLabel={`Set bubble size to ${option.label}`} onPress={() => onAppearanceChange({ ...bubbleAppearance, sizeDp: option.sizeDp })} style={[appearanceStyles.sizePill, bubbleAppearance.sizeDp === option.sizeDp && appearanceStyles.sizePillSelected]}><Text style={[appearanceStyles.sizeText, bubbleAppearance.sizeDp === option.sizeDp && appearanceStyles.sizeTextSelected]}>{option.label}</Text></TouchableOpacity>)}</View><Text style={appearanceStyles.label}>COLOR</Text><View style={appearanceStyles.colorRow}>{BUBBLE_COLORS.map((option) => <TouchableOpacity key={option.value} accessibilityLabel={`Set bubble color to ${option.label}`} onPress={() => onAppearanceChange({ ...bubbleAppearance, color: option.value })} style={[appearanceStyles.colorButton, bubbleAppearance.color === option.value && appearanceStyles.colorButtonSelected]}><View style={[appearanceStyles.colorSwatch, { backgroundColor: option.value }]} /></TouchableOpacity>)}</View></View>
     <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Local history</Text><Text style={styles.sectionCount}>{conversations.length}</Text></View>
     <FlatList data={conversations} keyExtractor={(item) => item.id} contentContainerStyle={conversations.length ? styles.listContent : styles.emptyContent} renderItem={({ item }) => <TouchableOpacity accessibilityLabel={`Open ${item.title}`} onPress={() => onOpen(item)} style={styles.conversationCard}><View style={styles.conversationGlyph}><Text style={styles.conversationGlyphText}>✦</Text></View><View style={styles.flex}><Text numberOfLines={1} style={styles.conversationTitle}>{item.title}</Text><Text numberOfLines={1} style={styles.conversationPreview}>{item.messages.at(-1)?.content || "No messages yet"}</Text></View><View style={styles.conversationMeta}><Text style={styles.dateText}>{dateLabel(item.updatedAt)}</Text><TouchableOpacity accessibilityLabel={`Delete ${item.title}`} onPress={() => onDelete(item)} style={styles.deleteButton}><Text style={styles.deleteButtonText}>×</Text></TouchableOpacity></View></TouchableOpacity>} ListEmptyComponent={<View style={styles.emptyState}><View style={styles.emptyOrbit}><Text style={styles.emptyOrbitText}>✦</Text></View><Text style={styles.emptyTitle}>A clear workspace</Text><Text style={styles.emptyText}>Start a conversation here, then keep it close with the floating bubble.</Text></View>} />
     <TouchableOpacity accessibilityLabel="Start a new chat" onPress={onCreate} style={styles.primaryButton}><Text style={styles.primaryButtonText}>＋  New chat</Text></TouchableOpacity>
@@ -271,4 +298,23 @@ const bubbleStyles = StyleSheet.create({
   toggleOn: { backgroundColor: colors.primary },
   knob: { backgroundColor: colors.text, borderRadius: 12, height: 23, width: 23 },
   knobOn: { alignSelf: "flex-end" },
+});
+
+const appearanceStyles = StyleSheet.create({
+  panel: { backgroundColor: "#101C17", borderColor: colors.border, borderRadius: 19, borderWidth: 1, marginBottom: 23, padding: 14 },
+  headingRow: { alignItems: "center", flexDirection: "row", gap: 12, marginBottom: 14 },
+  title: { color: colors.text, fontSize: 13, fontWeight: "800", marginBottom: 3 },
+  detail: { color: colors.muted, fontSize: 11, lineHeight: 16 },
+  preview: { alignItems: "center", borderColor: colors.text, borderRadius: 30, borderWidth: 1.5, justifyContent: "center", maxHeight: 45, maxWidth: 45, minHeight: 27, minWidth: 27 },
+  previewText: { color: "#081000", fontSize: 10, fontWeight: "900" },
+  label: { color: colors.muted, fontSize: 10, fontWeight: "800", letterSpacing: 1.1, marginBottom: 8, marginTop: 5 },
+  sizeRow: { flexDirection: "row", gap: 7, marginBottom: 11 },
+  sizePill: { alignItems: "center", backgroundColor: colors.elevated, borderColor: colors.border, borderRadius: 12, borderWidth: 1, flex: 1, minHeight: 38, justifyContent: "center", paddingHorizontal: 6 },
+  sizePillSelected: { backgroundColor: "#263D1E", borderColor: colors.primary },
+  sizeText: { color: colors.muted, fontSize: 11, fontWeight: "700" },
+  sizeTextSelected: { color: colors.lime },
+  colorRow: { flexDirection: "row", gap: 11 },
+  colorButton: { alignItems: "center", borderColor: "transparent", borderRadius: 18, borderWidth: 2, height: 34, justifyContent: "center", width: 34 },
+  colorButtonSelected: { borderColor: colors.text },
+  colorSwatch: { borderRadius: 12, height: 22, width: 22 },
 });
