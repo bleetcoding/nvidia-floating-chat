@@ -28,3 +28,4 @@
 - [x] Add a native Android Floating AI Keyboard input method with rewrite and grammar tools
 - [x] Add rewrite presets, custom rewrite instructions, generated suggestions, and selected-text replacement in the AI keyboard
 - [x] Add keyboard enable/setup guidance and validation for the Android input method
+- [ ] Publish the verified Android APK as a public GitHub Release asset with a direct download link

@@ -9,7 +9,7 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -50,3 +50,12 @@ jobs:
           name: floating-ai-chat-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      - name: Publish APK release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-apk-${{ github.run_number }}
+          name: Floating AI Chat Android APK #${{ github.run_number }}
+          body: Verified Android release APK built from commit ${{ github.sha }}.
+          files: android/app/build/outputs/apk/release/app-release.apk
+          fail_on_unmatched_files: true
