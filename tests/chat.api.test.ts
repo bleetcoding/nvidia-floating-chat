@@ -23,4 +23,8 @@ describe("OpenAI-compatible provider URL helpers", () => {
   it("extracts a non-streamed OpenAI-compatible assistant completion for Android fallback transport", () => {
     expect(extractCompletionText(JSON.stringify({ choices: [{ message: { content: "Hello from the provider" } }] }))).toBe("Hello from the provider");
   });
+
+  it("also accepts text-style completion payloads from compatible providers", () => {
+    expect(extractCompletionText(JSON.stringify({ choices: [{ text: "OK" }] }))).toBe("OK");
+  });
 });

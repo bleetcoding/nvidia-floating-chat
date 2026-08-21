@@ -33,6 +33,7 @@ export interface ProviderSettings {
   endpoint: string;
   model: string;
   lastTestedAt?: string;
+  lastVerifiedModel?: string;
 }
 
 export interface ProviderTestResult {
@@ -40,6 +41,13 @@ export interface ProviderTestResult {
   status: number;
   message: string;
   models: string[];
+}
+
+export interface SelectedModelTestResult {
+  ok: boolean;
+  status: number;
+  message: string;
+  model: string;
 }
 
 export const defaultProviderSettings: ProviderSettings = {

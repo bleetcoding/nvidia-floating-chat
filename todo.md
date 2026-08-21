@@ -19,3 +19,6 @@
 - [x] Improve connection feedback for stale, unavailable, or inaccessible model identifiers
 - [x] Fix Android chat completion parsing when the response is delivered as JSON instead of a readable stream
 - [x] Fix the floating bubble’s unmatched deep link so it returns to the chat home route
+- [x] Use a reliable non-stream completion request on Android when sending chat messages
+- [x] Add a Test selected model control with explicit pass/fail feedback in Configuration
+- [x] Distinguish successfully tested chat models from incompatible catalog entries

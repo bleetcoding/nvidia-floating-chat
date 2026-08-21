@@ -16,7 +16,7 @@ import { StatusBar } from "expo-status-bar";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { attachmentSummary, selectAttachments, toStoredAttachment, type PreparedAttachment } from "@/lib/chat/attachments";
-import { streamChatCompletion, testProviderConnection } from "@/lib/chat/api";
+import { streamChatCompletion, testProviderConnection, testSelectedChatModel } from "@/lib/chat/api";
 import { defaultBubbleAppearance, floatingBubble, type BubbleAppearance } from "@/lib/chat/floating-bubble";
 import {
   loadApiKey,
@@ -33,6 +33,7 @@ import {
   type Conversation,
   type ProviderSettings,
   type ProviderTestResult,
+  type SelectedModelTestResult,
 } from "@/lib/chat/types";
 
 type Screen = "library" | "conversation" | "settings";
@@ -81,6 +82,8 @@ export default function HomeScreen() {
   const [isReady, setIsReady] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
+  const [isTestingModel, setIsTestingModel] = useState(false);
+  const [modelTestResult, setModelTestResult] = useState<SelectedModelTestResult | null>(null);
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [showKey, setShowKey] = useState(false);
   const [bubbleEnabled, setBubbleEnabled] = useState(false);
@@ -110,7 +113,7 @@ export default function HomeScreen() {
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
     [activeConversationId, conversations],
   );
-  const configured = Boolean(apiKey && settings.endpoint && settings.model);
+  const configured = Boolean(apiKey && settings.endpoint && settings.model && settings.lastVerifiedModel === settings.model);
 
   const saveSettings = async () => {
     const normalized = { ...settings, endpoint: settings.endpoint.trim().replace(/\/+$/, ""), model: settings.model.trim() };
@@ -127,7 +130,26 @@ export default function HomeScreen() {
     setTestResult(result);
     if (result.ok) {
       setDiscoveredModels(result.models);
-      const nextSettings = { ...settings, lastTestedAt: new Date().toISOString(), model: settings.model || result.models[0] || "" };
+      const nextSettings = { ...settings, lastTestedAt: new Date().toISOString() };
+      setSettings(nextSettings);
+      await Promise.all([saveProviderSettings(nextSettings), saveApiKey(apiKey)]);
+    }
+  };
+
+  const updateSettings = (nextSettings: ProviderSettings) => {
+    const hasChangedModel = nextSettings.model.trim() !== settings.model.trim() || nextSettings.endpoint.trim() !== settings.endpoint.trim();
+    setSettings(hasChangedModel ? { ...nextSettings, lastVerifiedModel: undefined } : nextSettings);
+    if (hasChangedModel) setModelTestResult(null);
+  };
+
+  const runSelectedModelTest = async () => {
+    setIsTestingModel(true);
+    setModelTestResult(null);
+    const result = await testSelectedChatModel(settings, apiKey);
+    setIsTestingModel(false);
+    setModelTestResult(result);
+    if (result.ok) {
+      const nextSettings = { ...settings, lastVerifiedModel: result.model };
       setSettings(nextSettings);
       await Promise.all([saveProviderSettings(nextSettings), saveApiKey(apiKey)]);
     }
@@ -207,7 +229,7 @@ export default function HomeScreen() {
       <StatusBar style="light" />
       {screen === "library" ? <ConversationLibrary conversations={conversations} configured={configured} bubbleEnabled={bubbleEnabled} bubbleAppearance={bubbleAppearance} onCreate={newConversation} onOpen={openConversation} onDelete={deleteConversation} onOpenSettings={() => setScreen("settings")} onToggleBubble={() => void toggleBubble()} onAppearanceChange={(appearance) => void applyBubbleAppearance(appearance)} /> : null}
       {screen === "conversation" ? <ConversationScreen conversation={activeConversation} settings={settings} apiKey={apiKey} configured={configured} onBack={() => setScreen("library")} onOpenSettings={() => setScreen("settings")} onUpdateMessages={updateMessages} /> : null}
-      {screen === "settings" ? <SettingsScreen settings={settings} apiKey={apiKey} showKey={showKey} isTesting={isTesting} result={testResult} discoveredModels={discoveredModels} onBack={() => setScreen("library")} onSettingsChange={setSettings} onApiKeyChange={setApiKey} onShowKey={() => setShowKey((current) => !current)} onTest={() => void runTest()} onSave={() => void saveSettings()} /> : null}
+      {screen === "settings" ? <SettingsScreen settings={settings} apiKey={apiKey} showKey={showKey} isTesting={isTesting} result={testResult} isTestingModel={isTestingModel} modelTestResult={modelTestResult} discoveredModels={discoveredModels} onBack={() => setScreen("library")} onSettingsChange={updateSettings} onApiKeyChange={setApiKey} onShowKey={() => setShowKey((current) => !current)} onTest={() => void runTest()} onTestModel={() => void runSelectedModelTest()} onSave={() => void saveSettings()} /> : null}
     </ScreenContainer>
   );
 }
@@ -280,7 +302,7 @@ function MessageCard({ message, onCopy, onEdit, onResend }: { message: ChatMessa
   return <View style={[styles.messageWrap, isUser ? styles.messageWrapUser : styles.messageWrapAssistant]}><View style={[styles.messageBubble, isUser ? styles.userBubble : styles.assistantBubble]}>{message.content ? <Text selectable style={[styles.messageText, isUser ? styles.userText : styles.assistantText]}>{message.content}</Text> : <View style={styles.typingRow}><View style={styles.typingDot} /><View style={styles.typingDot} /><View style={styles.typingDot} /></View>}{message.attachments?.length ? <View style={styles.sentAttachments}>{message.attachments.map((attachment) => <Text key={attachment.id} style={styles.sentAttachmentText}>⌁ {attachmentSummary(attachment)}: {attachment.name}</Text>)}</View> : null}</View><View style={styles.messageActions}><TouchableOpacity accessibilityLabel="Copy message" onPress={onCopy}><Text style={styles.messageActionText}>Copy</Text></TouchableOpacity>{onEdit ? <TouchableOpacity accessibilityLabel="Edit message" onPress={onEdit}><Text style={styles.messageActionText}>Edit</Text></TouchableOpacity> : null}{onResend ? <TouchableOpacity accessibilityLabel="Regenerate response" onPress={onResend}><Text style={styles.messageActionText}>Retry</Text></TouchableOpacity> : null}</View></View>;
 }
 
-function SettingsScreen({ settings, apiKey, showKey, isTesting, result, discoveredModels, onBack, onSettingsChange, onApiKeyChange, onShowKey, onTest, onSave }: { settings: ProviderSettings; apiKey: string; showKey: boolean; isTesting: boolean; result: ProviderTestResult | null; discoveredModels: string[]; onBack: () => void; onSettingsChange: (settings: ProviderSettings) => void; onApiKeyChange: (apiKey: string) => void; onShowKey: () => void; onTest: () => void; onSave: () => void }) {
+function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestingModel, modelTestResult, discoveredModels, onBack, onSettingsChange, onApiKeyChange, onShowKey, onTest, onTestModel, onSave }: { settings: ProviderSettings; apiKey: string; showKey: boolean; isTesting: boolean; result: ProviderTestResult | null; isTestingModel: boolean; modelTestResult: SelectedModelTestResult | null; discoveredModels: string[]; onBack: () => void; onSettingsChange: (settings: ProviderSettings) => void; onApiKeyChange: (apiKey: string) => void; onShowKey: () => void; onTest: () => void; onTestModel: () => void; onSave: () => void }) {
   const [modelSearch, setModelSearch] = useState("");
   const matchingModels = discoveredModels.filter((model) => model.toLowerCase().includes(modelSearch.trim().toLowerCase()));
 
@@ -289,8 +311,8 @@ function SettingsScreen({ settings, apiKey, showKey, isTesting, result, discover
     <FlatList data={["settings"]} keyExtractor={(item) => item} showsVerticalScrollIndicator={false} renderItem={() => <View style={styles.settingsContent}>
       <Text style={styles.fieldLabel}>API endpoint</Text><TextInput accessibilityLabel="API endpoint" autoCapitalize="none" autoCorrect={false} keyboardType="url" value={settings.endpoint} onChangeText={(endpoint) => onSettingsChange({ ...settings, endpoint })} placeholder="https://integrate.api.nvidia.com/v1" placeholderTextColor={colors.muted} style={styles.input} /><Text style={styles.helperText}>NVIDIA’s endpoint is ready by default. You may replace it with another compatible provider.</Text>
       <Text style={styles.fieldLabel}>API key</Text><View style={styles.keyRow}><TextInput accessibilityLabel="API key" autoCapitalize="none" autoCorrect={false} secureTextEntry={!showKey} value={apiKey} onChangeText={onApiKeyChange} placeholder="Paste your provider key" placeholderTextColor={colors.muted} style={[styles.input, styles.keyInput]} /><TouchableOpacity accessibilityLabel={showKey ? "Hide API key" : "Show API key"} onPress={onShowKey} style={styles.revealButton}><Text style={styles.revealButtonText}>{showKey ? "Hide" : "Show"}</Text></TouchableOpacity></View><Text style={styles.helperText}>The key is stored in Android secure storage and is never shown in chat history.</Text>
-      <View style={styles.fieldHeader}><Text style={styles.fieldLabel}>Model identifier</Text>{settings.lastTestedAt ? <Text style={styles.testedAt}>Tested {dateLabel(settings.lastTestedAt)}</Text> : null}</View><TextInput accessibilityLabel="Model identifier" autoCapitalize="none" autoCorrect={false} value={settings.model} onChangeText={(model) => onSettingsChange({ ...settings, model })} placeholder="Refresh catalog or enter a model ID" placeholderTextColor={colors.muted} style={styles.input} />
-      {discoveredModels.length ? <View style={styles.modelList}><Text style={styles.discoveredLabel}>LIVE MODEL CATALOG · {discoveredModels.length}</Text><Text style={styles.helperText}>Every ID returned by the provider is shown. Search or scroll to select one.</Text><TextInput accessibilityLabel="Search live model catalog" autoCapitalize="none" autoCorrect={false} value={modelSearch} onChangeText={setModelSearch} placeholder="Search model IDs" placeholderTextColor={colors.muted} style={styles.input} />{matchingModels.length ? matchingModels.map((model) => <TouchableOpacity key={model} accessibilityLabel={`Select model ${model}`} onPress={() => onSettingsChange({ ...settings, model })} style={[styles.modelChip, settings.model === model && styles.modelChipSelected]}><Text numberOfLines={1} style={[styles.modelChipText, settings.model === model && styles.modelChipTextSelected]}>{model}</Text></TouchableOpacity>) : <Text style={styles.helperText}>No live model IDs match this search.</Text>}</View> : null}
+      <View style={styles.fieldHeader}><Text style={styles.fieldLabel}>Model identifier</Text>{settings.lastVerifiedModel === settings.model ? <Text style={styles.testedAt}>Chat tested ✓</Text> : settings.lastTestedAt ? <Text style={styles.testedAt}>Catalog refreshed {dateLabel(settings.lastTestedAt)}</Text> : null}</View><TextInput accessibilityLabel="Model identifier" autoCapitalize="none" autoCorrect={false} value={settings.model} onChangeText={(model) => onSettingsChange({ ...settings, model })} placeholder="Refresh catalog or enter a model ID" placeholderTextColor={colors.muted} style={styles.input} /><TouchableOpacity accessibilityLabel="Test selected model" disabled={isTestingModel} onPress={onTestModel} style={[styles.testButton, isTestingModel && styles.buttonDisabled]}>{isTestingModel ? <ActivityIndicator color={colors.text} /> : <Text style={styles.testButtonText}>Test selected model</Text>}</TouchableOpacity>{modelTestResult ? <View style={[styles.resultCard, modelTestResult.ok ? styles.resultSuccess : styles.resultError]}><Text style={[styles.resultHeading, modelTestResult.ok ? styles.resultHeadingSuccess : styles.resultHeadingError]}>{modelTestResult.ok ? "Selected chat model works" : "Selected model is not usable for chat"}</Text><Text style={styles.resultMessage}>{modelTestResult.message}</Text></View> : null}
+      {discoveredModels.length ? <View style={styles.modelList}><Text style={styles.discoveredLabel}>LIVE MODEL CATALOG · {discoveredModels.length}</Text><Text style={styles.helperText}>The provider returns models for several tasks. Select one, then use Test selected model; only a passing chat test enables messages.</Text><TextInput accessibilityLabel="Search live model catalog" autoCapitalize="none" autoCorrect={false} value={modelSearch} onChangeText={setModelSearch} placeholder="Search model IDs" placeholderTextColor={colors.muted} style={styles.input} />{matchingModels.length ? matchingModels.map((model) => <TouchableOpacity key={model} accessibilityLabel={`Select model ${model}`} onPress={() => onSettingsChange({ ...settings, model })} style={[styles.modelChip, settings.model === model && styles.modelChipSelected]}><Text numberOfLines={1} style={[styles.modelChipText, settings.model === model && styles.modelChipTextSelected]}>{model}</Text></TouchableOpacity>) : <Text style={styles.helperText}>No live model IDs match this search.</Text>}</View> : null}
       <TouchableOpacity accessibilityLabel="Refresh live model catalog" disabled={isTesting} onPress={onTest} style={[styles.testButton, isTesting && styles.buttonDisabled]}>{isTesting ? <ActivityIndicator color={colors.text} /> : <Text style={styles.testButtonText}>Refresh live model catalog</Text>}</TouchableOpacity>{result ? <View style={[styles.resultCard, result.ok ? styles.resultSuccess : styles.resultError]}><Text style={[styles.resultHeading, result.ok ? styles.resultHeadingSuccess : styles.resultHeadingError]}>{result.ok ? "Connection verified" : "Connection not verified"}</Text><Text style={styles.resultMessage}>{result.message}</Text></View> : null}
       <View style={styles.privacyCard}><Text style={styles.privacyTitle}>Privacy checkpoint</Text><Text style={styles.privacyText}>Refreshing the catalog sends only an authenticated request to the provider’s model list. Messages and chosen attachments are sent only when you press Send.</Text></View>
     </View>} ListFooterComponent={<TouchableOpacity accessibilityLabel="Save provider settings" onPress={onSave} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Save connection settings</Text></TouchableOpacity>} />

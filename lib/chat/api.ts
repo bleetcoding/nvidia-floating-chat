@@ -1,5 +1,5 @@
 import type { PreparedAttachment } from "@/lib/chat/attachments";
-import type { ChatMessage, ProviderSettings, ProviderTestResult } from "@/lib/chat/types";
+import type { ChatMessage, ProviderSettings, ProviderTestResult, SelectedModelTestResult } from "@/lib/chat/types";
 
 export function normalizeEndpoint(endpoint: string): string {
   return endpoint.trim().replace(/\/+$/, "");
@@ -32,8 +32,8 @@ export function normalizeModelCatalog(data: Array<{ id?: string }> | undefined):
 
 export function extractCompletionText(payloadText: string): string {
   try {
-    const payload = JSON.parse(payloadText) as { choices?: Array<{ message?: { content?: unknown }; delta?: { content?: unknown } }> };
-    const content = payload.choices?.[0]?.message?.content ?? payload.choices?.[0]?.delta?.content;
+    const payload = JSON.parse(payloadText) as { choices?: Array<{ message?: { content?: unknown }; delta?: { content?: unknown }; text?: unknown }> };
+    const content = payload.choices?.[0]?.message?.content ?? payload.choices?.[0]?.delta?.content ?? payload.choices?.[0]?.text;
     if (typeof content === "string") return content;
     if (Array.isArray(content)) {
       return content.map((part) => typeof part === "object" && part !== null && "text" in part && typeof part.text === "string" ? part.text : "").join("");
@@ -85,6 +85,28 @@ export async function testProviderConnection(settings: ProviderSettings, apiKey:
   }
 }
 
+export async function testSelectedChatModel(settings: ProviderSettings, apiKey: string): Promise<SelectedModelTestResult> {
+  const endpoint = normalizeEndpoint(settings.endpoint);
+  const model = settings.model.trim();
+  if (!endpoint) return { ok: false, status: 0, model, message: "Enter an API endpoint first." };
+  if (!apiKey.trim()) return { ok: false, status: 0, model, message: "Enter an API key first." };
+  if (!model) return { ok: false, status: 0, model, message: "Select or enter a model identifier first." };
+  try {
+    const response = await fetch(chatCompletionsUrl(endpoint), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey.trim()}`, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ model, messages: [{ role: "user", content: "Reply with exactly: OK" }], max_tokens: 16, temperature: 0, stream: false }),
+    });
+    const body = await response.text();
+    if (!response.ok) return { ok: false, status: response.status, model, message: providerError(response.status, response.statusText, body) };
+    const output = extractCompletionText(body);
+    if (!output.trim()) return { ok: false, status: response.status, model, message: "This model completed the request but returned no chat text. Choose a chat/instruct model instead." };
+    return { ok: true, status: response.status, model, message: `Model replied successfully: “${output.trim().slice(0, 80)}”` };
+  } catch (error) {
+    return { ok: false, status: 0, model, message: error instanceof Error ? error.message : "The selected model could not be tested." };
+  }
+}
+
 export async function streamChatCompletion({
   settings,
   apiKey,
@@ -103,56 +125,18 @@ export async function streamChatCompletion({
   const response = await fetch(chatCompletionsUrl(settings.endpoint), {
     method: "POST",
     signal,
-    headers: { Authorization: `Bearer ${apiKey.trim()}`, "Content-Type": "application/json", Accept: "text/event-stream, application/json" },
+    headers: { Authorization: `Bearer ${apiKey.trim()}`, "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
       model: settings.model.trim(),
       messages: messages.map((message, index) => ({
         role: message.role,
         content: index === messages.length - 1 && message.role === "user" ? messageContent(message, currentAttachments) : message.content,
       })),
-      stream: true,
+      stream: false,
     }),
   });
   if (!response.ok) throw new Error(providerError(response.status, response.statusText, await response.text()));
-  if (!response.body || typeof response.body.getReader !== "function") {
-    const fallbackText = extractCompletionText(await response.text());
-    if (!fallbackText) throw new Error("The provider completed the request but returned no assistant text.");
-    onDelta(fallbackText);
-    return;
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let rawResponse = "";
-  let emittedText = false;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    const decoded = decoder.decode(value, { stream: true });
-    rawResponse += decoded;
-    buffer += decoded;
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line.startsWith("data:")) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === "[DONE]") continue;
-      try {
-        const payload = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
-        const delta = payload.choices?.[0]?.delta?.content;
-        if (delta) {
-          emittedText = true;
-          onDelta(delta);
-        }
-      } catch {
-        // Ignore non-JSON keep-alive events emitted by compatible providers.
-      }
-    }
-  }
-  if (!emittedText) {
-    const fallbackText = extractCompletionText(rawResponse);
-    if (!fallbackText) throw new Error("The provider completed the request but returned no assistant text.");
-    onDelta(fallbackText);
-  }
+  const text = extractCompletionText(await response.text());
+  if (!text.trim()) throw new Error("The selected model completed the request but returned no chat text. Test a different chat/instruct model in Configuration.");
+  onDelta(text);
 }
