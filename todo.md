@@ -17,3 +17,5 @@
 - [x] Add persistent floating-bubble size and color customization controls
 - [x] Fetch the full live provider model catalog and present it in a searchable mobile-scrollable selector
 - [x] Improve connection feedback for stale, unavailable, or inaccessible model identifiers
+- [x] Fix Android chat completion parsing when the response is delivered as JSON instead of a readable stream
+- [x] Fix the floating bubble’s unmatched deep link so it returns to the chat home route

@@ -30,6 +30,20 @@ export function normalizeModelCatalog(data: Array<{ id?: string }> | undefined):
   return Array.from(new Set((data ?? []).map((model) => model.id?.trim()).filter((id): id is string => Boolean(id)))).sort((left, right) => left.localeCompare(right));
 }
 
+export function extractCompletionText(payloadText: string): string {
+  try {
+    const payload = JSON.parse(payloadText) as { choices?: Array<{ message?: { content?: unknown }; delta?: { content?: unknown } }> };
+    const content = payload.choices?.[0]?.message?.content ?? payload.choices?.[0]?.delta?.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content.map((part) => typeof part === "object" && part !== null && "text" in part && typeof part.text === "string" ? part.text : "").join("");
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 function messageContent(message: ChatMessage, currentAttachments: PreparedAttachment[]) {
   const textAttachments = currentAttachments.filter((attachment) => attachment.kind === "text");
   const imageAttachments = currentAttachments.filter((attachment) => attachment.kind === "image" && attachment.imageDataUrl);
@@ -100,14 +114,23 @@ export async function streamChatCompletion({
     }),
   });
   if (!response.ok) throw new Error(providerError(response.status, response.statusText, await response.text()));
-  if (!response.body) throw new Error("The provider returned no response body.");
+  if (!response.body || typeof response.body.getReader !== "function") {
+    const fallbackText = extractCompletionText(await response.text());
+    if (!fallbackText) throw new Error("The provider completed the request but returned no assistant text.");
+    onDelta(fallbackText);
+    return;
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let rawResponse = "";
+  let emittedText = false;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    const decoded = decoder.decode(value, { stream: true });
+    rawResponse += decoded;
+    buffer += decoded;
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const rawLine of lines) {
@@ -118,10 +141,18 @@ export async function streamChatCompletion({
       try {
         const payload = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> };
         const delta = payload.choices?.[0]?.delta?.content;
-        if (delta) onDelta(delta);
+        if (delta) {
+          emittedText = true;
+          onDelta(delta);
+        }
       } catch {
         // Ignore non-JSON keep-alive events emitted by compatible providers.
       }
     }
+  }
+  if (!emittedText) {
+    const fallbackText = extractCompletionText(rawResponse);
+    if (!fallbackText) throw new Error("The provider completed the request but returned no assistant text.");
+    onDelta(fallbackText);
   }
 }
