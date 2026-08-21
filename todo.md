@@ -39,8 +39,8 @@
 - [x] Add insert, replace, copy, dismiss, and direct message-input actions to the response overlay
 - [x] Add a default assistant personality setting in the main app for overlay and prompt recommendations
 - [x] Add optional voice input and spoken-response controls with clear permission and privacy feedback
-- [ ] Rebuild the native Android input method for cross-app typing and accepted-response replacement
-- [ ] Add configurable keyboard height, key scale, action-row capacity, and floating-panel dimensions
-- [ ] Enforce plain-text AI responses without Markdown markers, tables, or decorative formatting
-- [ ] Show three contextual prompt cards after 5–8 seconds of stable text-only accessibility context
-- [ ] Reset prompt-card context collection when visible text changes before the stability delay completes
+- [x] Rebuild the native Android input method for cross-app typing and accepted-response replacement
+- [x] Add configurable keyboard height, key scale, action-row capacity, and floating-panel dimensions
+- [x] Enforce plain-text AI responses without Markdown markers, tables, or decorative formatting
+- [x] Show three contextual prompt cards after 5–8 seconds of stable text-only accessibility context
+- [x] Reset prompt-card context collection when visible text changes before the stability delay completes
