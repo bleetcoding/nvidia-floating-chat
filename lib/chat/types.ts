@@ -44,6 +44,8 @@ export interface ProviderSettings {
   keyboardKeyScale?: number;
   keyboardActionRows?: number;
   contextPromptDelayMs?: number;
+  contextExclusionsEnabled?: boolean;
+  contextExcludedPackages?: string;
 }
 
 export interface ProviderTestResult {
@@ -72,6 +74,8 @@ export const defaultProviderSettings: ProviderSettings = {
   keyboardKeyScale: 1,
   keyboardActionRows: 1,
   contextPromptDelayMs: 6500,
+  contextExclusionsEnabled: false,
+  contextExcludedPackages: "",
 };
 
 export function createId(prefix: string): string {

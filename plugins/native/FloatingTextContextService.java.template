@@ -1,6 +1,7 @@
 package __PACKAGE__;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -15,6 +16,7 @@ public class FloatingTextContextService extends AccessibilityService {
   @Override public void onServiceConnected() { active = this; }
   @Override public void onAccessibilityEvent(AccessibilityEvent event) {
     if (event == null || event.getPackageName() == null || getPackageName().contentEquals(event.getPackageName())) return;
+    if (excluded(event.getPackageName())) { clearFocused(); return; }
     AccessibilityNodeInfo source = event.getSource();
     if (source == null) return;
     AccessibilityNodeInfo candidate = source.isEditable() ? source : source.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
@@ -37,6 +39,7 @@ public class FloatingTextContextService extends AccessibilityService {
     if (active == null) return "";
     AccessibilityNodeInfo root = active.getRootInActiveWindow();
     if (root == null) return "";
+    if (excluded(root.getPackageName())) { root.recycle(); return ""; }
     StringBuilder output = new StringBuilder();
     collect(root, output, new HashSet<String>(), limit);
     root.recycle();
@@ -59,14 +62,14 @@ public class FloatingTextContextService extends AccessibilityService {
   }
 
   public static boolean replace(String value) {
-    if (focused == null || sensitive(focused)) return false;
+    if (focused == null || sensitive(focused) || excluded(focused.getPackageName())) return false;
     Bundle args = new Bundle();
     args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value);
     return focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
   }
 
   public static boolean insert(String value) {
-    if (focused == null || sensitive(focused)) return false;
+    if (focused == null || sensitive(focused) || excluded(focused.getPackageName())) return false;
     String current = focused.getText() == null ? "" : focused.getText().toString();
     Bundle args = new Bundle();
     args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, current + (current.isEmpty() ? "" : " ") + value);
@@ -75,5 +78,15 @@ public class FloatingTextContextService extends AccessibilityService {
 
   private static boolean sensitive(AccessibilityNodeInfo node) {
     return node.isPassword() || (Build.VERSION.SDK_INT >= 34 && node.isAccessibilityDataSensitive());
+  }
+
+  private static void clearFocused() { if (focused != null) { focused.recycle(); focused = null; } }
+  private static boolean excluded(CharSequence packageName) {
+    if (active == null || packageName == null) return false;
+    SharedPreferences prefs = active.getSharedPreferences("floating_ai_bubble", 0);
+    if (!prefs.getBoolean("contextExclusionsEnabled", false)) return false;
+    String target = packageName.toString().trim();
+    for (String item : prefs.getString("contextExcludedPackages", "").split("[,\\n\\r\\s]+")) if (!item.trim().isEmpty() && target.equalsIgnoreCase(item.trim())) return true;
+    return false;
   }
 }
