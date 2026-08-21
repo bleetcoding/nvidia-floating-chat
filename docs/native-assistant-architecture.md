@@ -22,3 +22,10 @@ The candidate row contains **Friendly**, **Professional**, **Grammar**, and **Mo
 ## Conversation Interaction
 
 Starting a chat presents an optional instruction field. When populated, it is sent as a system instruction for that conversation only. In a conversation, the **Ideas** control requests three to five concise next-prompt suggestions from the configured model using the existing local message history. Tapping a suggestion places it directly in the composer for user review and submission.
+
+## Platform References
+
+The keyboard uses Android’s `InputMethodService` model, declares the required input-method service metadata, and uses `InputConnection` to obtain the selected or nearby text and commit an accepted rewrite. The native implementation deliberately avoids password/PIN variations.
+
+- Android Developers, [Creating an Input Method](https://android-developers.googleblog.com/2009/04/creating-input-method.html)
+- Android Developers, [InputConnection API reference](https://developer.android.com/reference/android/view/inputmethod/InputConnection)
