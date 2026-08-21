@@ -44,6 +44,6 @@
 - [x] Enforce plain-text AI responses without Markdown markers, tables, or decorative formatting
 - [x] Show three contextual prompt cards after 5–8 seconds of stable text-only accessibility context
 - [x] Reset prompt-card context collection when visible text changes before the stability delay completes
-- [ ] Add a manual keyboard control to immediately refresh contextual prompt cards
-- [ ] Add a keyboard language-switch key that opens Android’s configured input-method picker
-- [ ] Add an optional, default-off app exclusion list for visible-text context collection
+- [x] Add a manual keyboard control to immediately refresh contextual prompt cards
+- [x] Add a keyboard language-switch key that opens Android’s configured input-method picker
+- [x] Add an optional, default-off app exclusion list for visible-text context collection
