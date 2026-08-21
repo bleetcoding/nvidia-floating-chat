@@ -86,6 +86,8 @@ const config: ExpoConfig = {
   },
   plugins: [
     "./plugins/with-floating-bubble",
+    "expo-asset",
+    "expo-font",
     "expo-router",
     [
       "expo-audio",
@@ -121,6 +123,7 @@ const config: ExpoConfig = {
         },
       },
     ],
+    "expo-web-browser",
   ],
   experiments: {
     typedRoutes: true,

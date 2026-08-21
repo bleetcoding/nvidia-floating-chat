@@ -12,4 +12,5 @@
 - [x] Add app icon assets and configure Android branding
 - [x] Add Android-native build configuration and GitHub Actions compilation workflow
 - [x] Add deterministic tests, type-checking, and lint validation
-- [ ] Create a public GitHub repository and push the completed source
+- [x] Create a public GitHub repository and push the completed source
+- [x] Investigate and fix the Android launch crash in the published APK
