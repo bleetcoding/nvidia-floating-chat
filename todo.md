@@ -24,7 +24,7 @@
 - [x] Distinguish successfully tested chat models from incompatible catalog entries
 - [x] Add optional per-conversation system instructions before starting a new chat
 - [x] Add AI-generated prompt recommendations that use the current conversation context
-- [ ] Replace full-app overlay navigation with a compact, dismissible in-place conversation panel
-- [ ] Add a native Android Floating AI Keyboard input method with rewrite and grammar tools
-- [ ] Add rewrite presets, custom rewrite instructions, generated suggestions, and selected-text replacement in the AI keyboard
-- [ ] Add keyboard enable/setup guidance and validation for the Android input method
+- [x] Replace full-app overlay navigation with a compact, dismissible in-place conversation panel
+- [x] Add a native Android Floating AI Keyboard input method with rewrite and grammar tools
+- [x] Add rewrite presets, custom rewrite instructions, generated suggestions, and selected-text replacement in the AI keyboard
+- [x] Add keyboard enable/setup guidance and validation for the Android input method
