@@ -44,6 +44,21 @@ export function extractCompletionText(payloadText: string): string {
   }
 }
 
+export function toPlainAssistantText(value: string): string {
+  return value
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[\w-]*\n?|```/g, ""))
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+[.)]\s+/gm, "")
+    .replace(/\|/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function messageContent(message: ChatMessage, currentAttachments: PreparedAttachment[]) {
   const textAttachments = currentAttachments.filter((attachment) => attachment.kind === "text");
   const imageAttachments = currentAttachments.filter((attachment) => attachment.kind === "image" && attachment.imageDataUrl);
@@ -156,11 +171,11 @@ export async function generatePromptSuggestions({
   const text = extractCompletionText(await response.text()).trim();
   try {
     const parsed = JSON.parse(text) as unknown;
-    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 5);
+    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => toPlainAssistantText(item)).filter(Boolean).slice(0, 5);
   } catch {
     // Fall through for providers that return a newline list instead of JSON.
   }
-  return text.split(/\n+/).map((item) => item.replace(/^[-*\d.\s]+/, "").trim()).filter(Boolean).slice(0, 5);
+  return text.split(/\n+/).map((item) => toPlainAssistantText(item.replace(/^[-*\d.\s]+/, ""))).filter(Boolean).slice(0, 5);
 }
 
 export async function streamChatCompletion({
@@ -199,7 +214,7 @@ export async function streamChatCompletion({
     }),
   });
   if (!response.ok) throw new Error(providerError(response.status, response.statusText, await response.text()));
-  const text = extractCompletionText(await response.text());
+  const text = toPlainAssistantText(extractCompletionText(await response.text()));
   if (!text.trim()) throw new Error("The selected model completed the request but returned no chat text. Test a different chat/instruct model in Configuration.");
   onDelta(text);
 }

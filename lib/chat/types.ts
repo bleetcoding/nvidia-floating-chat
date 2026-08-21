@@ -39,6 +39,11 @@ export interface ProviderSettings {
   overlayContextEnabled?: boolean;
   overlayVoiceEnabled?: boolean;
   overlayPanelHeightDp?: number;
+  overlayPanelWidthDp?: number;
+  keyboardHeightDp?: number;
+  keyboardKeyScale?: number;
+  keyboardActionRows?: number;
+  contextPromptDelayMs?: number;
 }
 
 export interface ProviderTestResult {
@@ -62,6 +67,11 @@ export const defaultProviderSettings: ProviderSettings = {
   overlayContextEnabled: false,
   overlayVoiceEnabled: false,
   overlayPanelHeightDp: 380,
+  overlayPanelWidthDp: 344,
+  keyboardHeightDp: 350,
+  keyboardKeyScale: 1,
+  keyboardActionRows: 1,
+  contextPromptDelayMs: 6500,
 };
 
 export function createId(prefix: string): string {

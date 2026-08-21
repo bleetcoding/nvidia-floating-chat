@@ -69,6 +69,11 @@ export async function syncKeyboardConfiguration(settings: ProviderSettings, apiK
     canUseChat ? settings.endpoint.trim() : "",
     canUseChat ? settings.model.trim() : "",
     canUseChat ? apiKey.trim() : "",
+    settings.assistantPersonality ?? defaultProviderSettings.assistantPersonality ?? "Helpful, warm, concise, and practical.",
+    settings.keyboardHeightDp ?? defaultProviderSettings.keyboardHeightDp ?? 350,
+    settings.keyboardKeyScale ?? defaultProviderSettings.keyboardKeyScale ?? 1,
+    settings.keyboardActionRows ?? defaultProviderSettings.keyboardActionRows ?? 1,
+    settings.contextPromptDelayMs ?? defaultProviderSettings.contextPromptDelayMs ?? 6500,
   );
 }
 
