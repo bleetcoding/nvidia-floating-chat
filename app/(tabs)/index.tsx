@@ -18,7 +18,7 @@ import { StatusBar } from "expo-status-bar";
 import { ScreenContainer } from "@/components/screen-container";
 import { NewChatSetup } from "@/components/new-chat-setup";
 import { attachmentSummary, selectAttachments, toStoredAttachment, type PreparedAttachment } from "@/lib/chat/attachments";
-import { generatePromptSuggestions, streamChatCompletion, testProviderConnection, testSelectedChatModel } from "@/lib/chat/api";
+import { generatePromptSuggestions, streamChatCompletion, testProviderConnection, testSelectedChatModel, toPlainAssistantText } from "@/lib/chat/api";
 import { aiKeyboard } from "@/lib/chat/ai-keyboard";
 import { defaultBubbleAppearance, floatingBubble, type BubbleAppearance } from "@/lib/chat/floating-bubble";
 import {
@@ -330,7 +330,7 @@ function ConversationScreen({ conversation, settings, apiKey, configured, onBack
     }
     catch (error) { Alert.alert("Attachment unavailable", error instanceof Error ? error.message : "This file could not be prepared."); }
   };
-  const copyMessage = async (message: ChatMessage) => { await Clipboard.setStringAsync(message.content); Alert.alert("Copied", "The message is ready to paste in another app."); };
+  const copyMessage = async (message: ChatMessage) => { await Clipboard.setStringAsync(toPlainAssistantText(message.content)); };
   const stopStreaming = () => abortController.current?.abort();
   const send = async (replacement?: string) => {
     if (!conversation || isStreaming) return;
@@ -398,6 +398,7 @@ function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestin
         <Text style={overlaySettingsStyles.label}>PANEL CAPACITY</Text>
         <View style={overlaySettingsStyles.capacityRow}>{[{ label: "Compact", height: 300 }, { label: "Standard", height: 380 }, { label: "Extended", height: 520 }].map((option) => <TouchableOpacity key={option.height} accessibilityLabel={`Set overlay panel to ${option.label}`} onPress={() => onSettingsChange({ ...settings, overlayPanelHeightDp: option.height })} style={[overlaySettingsStyles.capacityPill, (settings.overlayPanelHeightDp ?? 380) === option.height && overlaySettingsStyles.capacityPillActive]}><Text style={[overlaySettingsStyles.capacityText, (settings.overlayPanelHeightDp ?? 380) === option.height && overlaySettingsStyles.capacityTextActive]}>{option.label}</Text></TouchableOpacity>)}</View>
         <Text style={overlaySettingsStyles.label}>PANEL WIDTH</Text><ConfigPills options={[{ label: "Narrow", value: 300 }, { label: "Standard", value: 344 }, { label: "Wide", value: 400 }]} value={settings.overlayPanelWidthDp ?? 344} onChange={(overlayPanelWidthDp) => onSettingsChange({ ...settings, overlayPanelWidthDp })} />
+        <Text style={overlaySettingsStyles.label}>EXACT WINDOW SIZE (DP)</Text><View style={overlaySettingsStyles.dimensionRow}><View style={styles.flex}><Text style={overlaySettingsStyles.dimensionLabel}>WIDTH</Text><TextInput accessibilityLabel="Floating window width in DP" keyboardType="number-pad" defaultValue={String(settings.overlayPanelWidthDp ?? 344)} onEndEditing={(event) => { const width = Number.parseInt(event.nativeEvent.text, 10); if (Number.isFinite(width)) onSettingsChange({ ...settings, overlayPanelWidthDp: Math.max(280, Math.min(420, width)) }); }} style={overlaySettingsStyles.dimensionInput} /></View><View style={styles.flex}><Text style={overlaySettingsStyles.dimensionLabel}>HEIGHT</Text><TextInput accessibilityLabel="Floating window height in DP" keyboardType="number-pad" defaultValue={String(settings.overlayPanelHeightDp ?? 380)} onEndEditing={(event) => { const height = Number.parseInt(event.nativeEvent.text, 10); if (Number.isFinite(height)) onSettingsChange({ ...settings, overlayPanelHeightDp: Math.max(300, Math.min(560, height)) }); }} style={overlaySettingsStyles.dimensionInput} /></View></View><Text style={styles.helperText}>You can also drag the panel by its title bar and drag its lower-right handle to resize it directly above other apps.</Text>
         <View style={overlaySettingsStyles.settingRow}><View style={styles.flex}><Text style={overlaySettingsStyles.rowTitle}>Voice controls</Text><Text style={overlaySettingsStyles.rowDetail}>Show a microphone for short spoken prompts and a speaker action for AI replies.</Text></View><TouchableOpacity accessibilityLabel="Toggle overlay voice controls" onPress={() => onVoiceChange(!settings.overlayVoiceEnabled)} style={[overlaySettingsStyles.toggle, settings.overlayVoiceEnabled && overlaySettingsStyles.toggleOn]}><View style={[overlaySettingsStyles.knob, settings.overlayVoiceEnabled && overlaySettingsStyles.knobOn]} /></TouchableOpacity></View>
       </View>
       <View style={styles.privacyCard}><Text style={styles.privacyTitle}>Privacy checkpoint</Text><Text style={styles.privacyText}>Messages and spoken prompts are sent only after your action. If visible text context is enabled, the keyboard can send permitted text after the selected stable delay or when you tap Refresh suggestions. Passwords, sensitive nodes, and any package IDs on your enabled exclusion list are excluded.</Text></View>
@@ -448,6 +449,9 @@ const overlaySettingsStyles = StyleSheet.create({
   capacityPillActive: { backgroundColor: "#263D1E", borderColor: colors.primary },
   capacityText: { color: colors.muted, fontSize: 10, fontWeight: "700" },
   capacityTextActive: { color: colors.lime },
+  dimensionRow: { flexDirection: "row", gap: 8 },
+  dimensionLabel: { color: colors.muted, fontSize: 10, fontWeight: "800", letterSpacing: 0.7, marginBottom: 6 },
+  dimensionInput: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 11, borderWidth: 1, color: colors.text, fontSize: 13, height: 42, paddingHorizontal: 10 },
 });
 
 const bubbleStyles = StyleSheet.create({

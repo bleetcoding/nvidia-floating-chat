@@ -47,3 +47,8 @@
 - [x] Add a manual keyboard control to immediately refresh contextual prompt cards
 - [x] Add a keyboard language-switch key that opens Android’s configured input-method picker
 - [x] Add an optional, default-off app exclusion list for visible-text context collection
+- [ ] Add direct drag-to-move, edge snapping, and on-panel resizing for the floating assistant window
+- [ ] Add editable width and height controls that match the floating window’s saved dimensions
+- [ ] Improve active-editor replacement and silently fall back to plain-text clipboard copy when a third-party field rejects replacement
+- [ ] Remove intrusive copied and replacement-failure popups and unnecessary result controls
+- [ ] Sanitize every copied and inserted AI response to remove Markdown and decorative characters

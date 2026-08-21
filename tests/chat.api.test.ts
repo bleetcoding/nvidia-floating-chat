@@ -36,4 +36,8 @@ describe("OpenAI-compatible provider URL helpers", () => {
   it("strips markdown decoration from assistant output before it reaches a plain-text surface", () => {
     expect(toPlainAssistantText("**Hello** | `world`\n- Keep this")).toBe("Hello world\nKeep this");
   });
+
+  it("removes residual star, underscore, backtick, pipe, and heading markers from copied text", () => {
+    expect(toPlainAssistantText("# *_Ready_* `now` | **go**")).toBe("Ready now go");
+  });
 });
