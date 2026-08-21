@@ -15,3 +15,5 @@
 - [x] Create a public GitHub repository and push the completed source
 - [x] Investigate and fix the Android launch crash in the published APK
 - [x] Add persistent floating-bubble size and color customization controls
+- [x] Fetch the full live provider model catalog and present it in a searchable mobile-scrollable selector
+- [x] Improve connection feedback for stale, unavailable, or inaccessible model identifiers

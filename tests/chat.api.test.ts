@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chatCompletionsUrl, modelsUrl, normalizeEndpoint } from "../lib/chat/api";
+import { chatCompletionsUrl, modelsUrl, normalizeEndpoint, normalizeModelCatalog } from "../lib/chat/api";
 
 describe("OpenAI-compatible provider URL helpers", () => {
   it("normalizes a base URL without trailing slashes", () => {
@@ -14,5 +14,9 @@ describe("OpenAI-compatible provider URL helpers", () => {
   it("preserves an explicitly supplied completions URL", () => {
     expect(chatCompletionsUrl("https://provider.example/v1/chat/completions")).toBe("https://provider.example/v1/chat/completions");
     expect(modelsUrl("https://provider.example/v1/chat/completions")).toBe("https://provider.example/v1/models");
+  });
+
+  it("keeps every unique provider model ID in stable catalog order", () => {
+    expect(normalizeModelCatalog([{ id: "zeta" }, { id: "alpha" }, { id: "zeta" }, {}, { id: " beta " }])).toEqual(["alpha", "beta", "zeta"]);
   });
 });

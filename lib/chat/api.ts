@@ -26,6 +26,10 @@ function providerError(status: number, statusText: string, body: string): string
   }
 }
 
+export function normalizeModelCatalog(data: Array<{ id?: string }> | undefined): string[] {
+  return Array.from(new Set((data ?? []).map((model) => model.id?.trim()).filter((id): id is string => Boolean(id)))).sort((left, right) => left.localeCompare(right));
+}
+
 function messageContent(message: ChatMessage, currentAttachments: PreparedAttachment[]) {
   const textAttachments = currentAttachments.filter((attachment) => attachment.kind === "text");
   const imageAttachments = currentAttachments.filter((attachment) => attachment.kind === "image" && attachment.imageDataUrl);
@@ -54,8 +58,14 @@ export async function testProviderConnection(settings: ProviderSettings, apiKey:
     const body = await response.text();
     if (!response.ok) return { ok: false, status: response.status, message: providerError(response.status, response.statusText, body), models: [] };
     const parsed = JSON.parse(body) as { data?: Array<{ id?: string }> };
-    const models = (parsed.data ?? []).map((model) => model.id).filter((id): id is string => Boolean(id));
-    return { ok: true, status: response.status, message: models.length ? `Connection confirmed. ${models.length} model${models.length === 1 ? "" : "s"} available.` : "Connection confirmed. Enter a model identifier to continue.", models };
+    const models = normalizeModelCatalog(parsed.data);
+    const selectedModel = settings.model.trim();
+    const selectionFeedback = selectedModel
+      ? models.includes(selectedModel)
+        ? ` “${selectedModel}” is listed by this live catalog.`
+        : ` “${selectedModel}” is not returned by this live catalog; select a listed model or verify provider access.`
+      : "";
+    return { ok: true, status: response.status, message: models.length ? `Connection confirmed. ${models.length} current model${models.length === 1 ? "" : "s"} returned.${selectionFeedback}` : "Connection confirmed, but this provider returned no model IDs. Enter a model identifier manually.", models };
   } catch (error) {
     return { ok: false, status: 0, message: error instanceof Error ? error.message : "The connection could not be completed.", models: [] };
   }
