@@ -1,0 +1,198 @@
+package __PACKAGE__;
+
+import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.PixelFormat;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.WindowManager;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+public class FloatingBubbleService extends Service {
+  private static final String CHANNEL_ID = "floating_chat_channel";
+  private static final int NOTIFICATION_ID = 742;
+  private static final String ACTION_REFRESH = "__PACKAGE__.REFRESH_FLOATING_BUBBLE";
+  private final Handler main = new Handler(Looper.getMainLooper());
+  private final ExecutorService worker = Executors.newSingleThreadExecutor();
+  private WindowManager manager;
+  private TextView bubble;
+  private LinearLayout panel;
+  private LinearLayout transcript;
+  private ScrollView transcriptScroll;
+  private EditText composer;
+  private TextView status;
+  private WindowManager.LayoutParams bubbleParams;
+  private TextToSpeech textToSpeech;
+  private SpeechRecognizer recognizer;
+  private boolean ttsReady;
+  private String latestAnswer = "";
+
+  @Override public void onCreate() {
+    super.onCreate();
+    createChannel();
+    textToSpeech = new TextToSpeech(this, code -> ttsReady = code == TextToSpeech.SUCCESS);
+    startForeground(NOTIFICATION_ID, notification());
+    showBubble();
+  }
+
+  @Override public int onStartCommand(Intent intent, int flags, int startId) {
+    if (intent != null && ACTION_REFRESH.equals(intent.getAction())) {
+      if (bubble != null) { manager.removeView(bubble); bubble = null; showBubble(); }
+      if (panel != null) { removePanel(); showPanel(); }
+    }
+    return START_STICKY;
+  }
+
+  private Notification notification() {
+    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("__SCHEME__://chat"));
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+    PendingIntent open = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    return new Notification.Builder(this, CHANNEL_ID).setContentTitle("Floating AI is active").setContentText("Tap the bubble for contextual responses").setSmallIcon(getApplicationInfo().icon).setContentIntent(open).setOngoing(true).build();
+  }
+
+  private void createChannel() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Floating AI", NotificationManager.IMPORTANCE_LOW);
+      channel.setDescription("Required while the user-controlled Floating AI panel is enabled");
+      ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).createNotificationChannel(channel);
+    }
+  }
+
+  private int overlayType() { return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE; }
+  private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + .5f); }
+  private android.content.SharedPreferences prefs() { return getSharedPreferences("floating_bubble", 0); }
+  private GradientDrawable rounded(int color, int radius) { GradientDrawable drawable = new GradientDrawable(); drawable.setColor(color); drawable.setCornerRadius(dp(radius)); drawable.setStroke(dp(1), Color.rgb(44, 58, 48)); return drawable; }
+  private TextView text(String value, int color, float size, boolean bold) { TextView view = new TextView(this); view.setText(value); view.setTextColor(color); view.setTextSize(size); if (bold) view.setTypeface(Typeface.DEFAULT_BOLD); return view; }
+  private TextView button(String value, int color) { TextView view = text(value, Color.rgb(241, 247, 240), 12, true); view.setGravity(Gravity.CENTER); view.setBackground(rounded(color, 12)); view.setPadding(dp(7), 0, dp(7), 0); return view; }
+
+  private void showBubble() {
+    manager = (WindowManager) getSystemService(WINDOW_SERVICE);
+    bubble = text("AI", Color.rgb(8, 16, 0), 15, true); bubble.setGravity(Gravity.CENTER);
+    GradientDrawable fill = new GradientDrawable(); fill.setShape(GradientDrawable.OVAL); fill.setColor(Color.parseColor(prefs().getString("color", "#76B900"))); fill.setStroke(dp(2), Color.rgb(181, 232, 83)); bubble.setBackground(fill);
+    int size = dp(prefs().getInt("sizeDp", 58));
+    bubbleParams = new WindowManager.LayoutParams(size, size, overlayType(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT);
+    bubbleParams.gravity = Gravity.TOP | Gravity.START; bubbleParams.x = dp(18); bubbleParams.y = dp(220);
+    bubble.setOnTouchListener(new View.OnTouchListener() {
+      private float rawX; private float rawY; private int startX; private int startY; private boolean dragged;
+      @Override public boolean onTouch(View view, MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN) { rawX = event.getRawX(); rawY = event.getRawY(); startX = bubbleParams.x; startY = bubbleParams.y; dragged = false; return true; }
+        if (event.getAction() == MotionEvent.ACTION_MOVE) { float dx = event.getRawX() - rawX; float dy = event.getRawY() - rawY; dragged = Math.abs(dx) > dp(6) || Math.abs(dy) > dp(6); bubbleParams.x = startX + (int) dx; bubbleParams.y = startY + (int) dy; manager.updateViewLayout(bubble, bubbleParams); return true; }
+        if (event.getAction() == MotionEvent.ACTION_UP) { if (!dragged) showPanel(); return true; }
+        return false;
+      }
+    });
+    manager.addView(bubble, bubbleParams);
+  }
+
+  private void showPanel() {
+    if (panel != null || manager == null) return;
+    panel = new LinearLayout(this); panel.setOrientation(LinearLayout.VERTICAL); panel.setPadding(dp(13), dp(11), dp(13), dp(11)); panel.setBackground(rounded(Color.rgb(12, 26, 22), 18));
+    LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
+    TextView title = text(prefs().getString("overlayTitle", "Floating AI Chat"), Color.rgb(242,247,241), 15, true); title.setSingleLine(true); header.addView(title, new LinearLayout.LayoutParams(0, dp(34), 1));
+    TextView close = text("×", Color.rgb(181,232,83), 28, false); close.setGravity(Gravity.CENTER); close.setContentDescription("Close floating assistant"); close.setOnClickListener(v -> removePanel()); header.addView(close, new LinearLayout.LayoutParams(dp(34), dp(34))); panel.addView(header);
+    TextView privacy = text(prefs().getBoolean("contextEnabled", false) ? "Visible text is used only after you tap an action." : "Screen text is off. Enable it in Configuration if you want context.", Color.rgb(154,168,155), 10, false); privacy.setPadding(0, 0, 0, dp(7)); panel.addView(privacy);
+    LinearLayout quick = new LinearLayout(this); quick.setOrientation(LinearLayout.HORIZONTAL); quick.setPadding(0, 0, 0, dp(8)); addQuick(quick, "Reply", "reply"); addQuick(quick, "Rewrite", "rewrite"); addQuick(quick, "Polish", "polish"); panel.addView(quick);
+    transcriptScroll = new ScrollView(this); transcript = new LinearLayout(this); transcript.setOrientation(LinearLayout.VERTICAL); transcriptScroll.addView(transcript); addEntry("Context", prefs().getString("overlayExcerpt", "Type a message or choose an action to begin.")); panel.addView(transcriptScroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+    status = text("Ready", Color.rgb(181,232,83), 11, true); status.setPadding(0, dp(6), 0, dp(4)); panel.addView(status);
+    LinearLayout compose = new LinearLayout(this); compose.setGravity(Gravity.BOTTOM);
+    composer = new EditText(this); composer.setTextColor(Color.rgb(242,247,241)); composer.setTextSize(13); composer.setHintTextColor(Color.rgb(143,157,145)); composer.setHint("Ask or type a reply…"); composer.setMaxLines(3); composer.setContentDescription("Floating assistant message input"); composer.setBackground(rounded(Color.rgb(24,36,30), 13)); composer.setPadding(dp(10), dp(5), dp(10), dp(5)); compose.addView(composer, new LinearLayout.LayoutParams(0, dp(48), 1));
+    if (prefs().getBoolean("voiceEnabled", false)) { TextView mic = button("Mic", Color.rgb(35,60,30)); mic.setContentDescription("Speak a prompt"); mic.setOnClickListener(v -> startVoice()); LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(dp(48), dp(48)); micParams.setMargins(dp(6), 0, 0, 0); compose.addView(mic, micParams); }
+    TextView ask = button("Ask", Color.rgb(118,185,0)); ask.setTextColor(Color.rgb(8,16,0)); ask.setContentDescription("Ask floating assistant"); ask.setOnClickListener(v -> request("ask")); LinearLayout.LayoutParams askParams = new LinearLayout.LayoutParams(dp(52), dp(48)); askParams.setMargins(dp(6), 0, 0, 0); compose.addView(ask, askParams); panel.addView(compose);
+    LinearLayout response = new LinearLayout(this); response.setGravity(Gravity.CENTER_VERTICAL); response.setPadding(0, dp(8), 0, 0); addResponseAction(response, "Replace", () -> replace()); addResponseAction(response, "Insert", () -> insert()); addResponseAction(response, "Copy", () -> copy()); if (prefs().getBoolean("voiceEnabled", false)) addResponseAction(response, "Speak", () -> speak()); panel.addView(response);
+    int height = Math.max(300, Math.min(560, prefs().getInt("panelHeightDp", 380)));
+    WindowManager.LayoutParams params = new WindowManager.LayoutParams(dp(344), dp(height), overlayType(), WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT);
+    params.gravity = Gravity.TOP | Gravity.END; params.x = dp(12); params.y = dp(82); params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE; manager.addView(panel, params); scrollBottom();
+  }
+
+  private void addQuick(LinearLayout row, String label, String mode) { TextView item = button(label, Color.rgb(35,60,30)); item.setContentDescription(label + " with screen context"); item.setOnClickListener(v -> request(mode)); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1); if (row.getChildCount() > 0) params.setMargins(dp(6), 0, 0, 0); row.addView(item, params); }
+  private void addResponseAction(LinearLayout row, String label, Runnable action) { TextView item = text(label, Color.rgb(181,232,83), 11, true); item.setGravity(Gravity.CENTER); item.setContentDescription(label + " latest AI response"); item.setOnClickListener(v -> action.run()); row.addView(item, new LinearLayout.LayoutParams(0, dp(28), 1)); }
+  private void addEntry(String author, String value) { if (value == null || value.trim().isEmpty() || transcript == null) return; TextView entry = text(author + "\n" + value.trim(), Color.rgb(226,235,226), 12, false); entry.setTextIsSelectable(true); entry.setLineSpacing(dp(2), 1); entry.setBackground(rounded(Color.rgb(19,33,27), 12)); entry.setPadding(dp(10), dp(8), dp(10), dp(8)); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT); params.setMargins(0, 0, 0, dp(7)); transcript.addView(entry, params); }
+  private void setStatus(String value) { if (status != null) status.setText(value); }
+  private void scrollBottom() { if (transcriptScroll != null) transcriptScroll.post(() -> transcriptScroll.fullScroll(View.FOCUS_DOWN)); }
+
+  private void request(String mode) {
+    String typed = composer == null ? "" : composer.getText().toString().trim();
+    String visible = prefs().getBoolean("contextEnabled", false) ? FloatingTextContextService.visibleText(1400) : "";
+    if (typed.isEmpty() && visible.isEmpty()) { setStatus("Type a message or enable visible screen text first."); return; }
+    String task = mode.equals("rewrite") ? "Rewrite the typed text while preserving its meaning." : mode.equals("polish") ? "Improve the typed text for clarity, tone, and readability." : mode.equals("reply") ? "Draft a short, natural reply to the typed text using visible context only when helpful." : "Answer the typed request using visible context only when helpful.";
+    addEntry("You", typed.isEmpty() ? "Use the visible context." : typed); setStatus("Thinking…"); scrollBottom();
+    worker.execute(() -> {
+      try {
+        String endpoint = FloatingAIKeyboardConfig.get(this, "endpoint"); String model = FloatingAIKeyboardConfig.get(this, "model"); String apiKey = FloatingAIKeyboardConfig.get(this, "apiKey");
+        if (endpoint.isEmpty() || model.isEmpty() || apiKey.isEmpty()) throw new Exception("Save a tested model in Floating AI Chat first.");
+        if (!endpoint.endsWith("/chat/completions")) endpoint = endpoint.replaceAll("/+$", "") + "/chat/completions";
+        JSONObject payload = new JSONObject(); payload.put("model", model); payload.put("stream", false); payload.put("max_tokens", 360); payload.put("temperature", .6);
+        JSONArray messages = new JSONArray(); messages.put(new JSONObject().put("role", "system").put("content", "You are a contextual writing assistant. Personality: " + prefs().getString("personality", "Helpful, warm, concise, and practical.") + " Return only the requested response.")); messages.put(new JSONObject().put("role", "user").put("content", task + "\nTyped text: " + (typed.isEmpty() ? "(none)" : typed) + "\nVisible text: " + (visible.isEmpty() ? "(none)" : visible))); payload.put("messages", messages);
+        HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection(); connection.setRequestMethod("POST"); connection.setConnectTimeout(20000); connection.setReadTimeout(30000); connection.setRequestProperty("Authorization", "Bearer " + apiKey); connection.setRequestProperty("Content-Type", "application/json"); connection.setDoOutput(true);
+        try (OutputStream output = connection.getOutputStream()) { output.write(payload.toString().getBytes("UTF-8")); }
+        int code = connection.getResponseCode(); BufferedReader reader = new BufferedReader(new InputStreamReader(code >= 200 && code < 300 ? connection.getInputStream() : connection.getErrorStream())); StringBuilder body = new StringBuilder(); String line; while ((line = reader.readLine()) != null) body.append(line); reader.close(); if (code < 200 || code >= 300) throw new Exception(body.toString());
+        JSONObject payloadResponse = new JSONObject(body.toString()); JSONArray choices = payloadResponse.optJSONArray("choices"); JSONObject choice = choices == null ? null : choices.optJSONObject(0); JSONObject message = choice == null ? null : choice.optJSONObject("message"); String answer = message == null ? "" : message.optString("content", "").trim(); if (answer.isEmpty()) throw new Exception("The selected model returned no text.");
+        main.post(() -> { latestAnswer = answer; addEntry("AI", answer); setStatus("Ready to replace, insert, copy, or speak."); scrollBottom(); });
+      } catch (Exception error) { main.post(() -> setStatus("AI request failed: " + error.getMessage())); }
+    });
+  }
+
+  private void replace() { if (latestAnswer.isEmpty()) { setStatus("Generate a response first."); return; } if (FloatingTextContextService.replace(latestAnswer)) setStatus("Replaced focused text."); else { copy(); setStatus("Could not replace this field. Copied instead."); } }
+  private void insert() { if (latestAnswer.isEmpty()) { setStatus("Generate a response first."); return; } if (FloatingTextContextService.insert(latestAnswer)) setStatus("Inserted into focused text."); else { copy(); setStatus("Could not insert here. Copied instead."); } }
+  private void copy() { if (latestAnswer.isEmpty()) { setStatus("Generate a response first."); return; } ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Floating AI response", latestAnswer)); setStatus("Copied. Paste it where you need it."); }
+  private void speak() { if (latestAnswer.isEmpty()) { setStatus("Generate a response first."); return; } if (ttsReady) { textToSpeech.stop(); textToSpeech.speak(latestAnswer, TextToSpeech.QUEUE_FLUSH, null, "floating-ai-response"); setStatus("Speaking response."); } else setStatus("Text-to-speech is not ready."); }
+
+  private void startVoice() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { setStatus("Allow microphone access in Configuration first."); return; }
+    if (!SpeechRecognizer.isRecognitionAvailable(this)) { setStatus("Speech recognition is unavailable on this device."); return; }
+    if (recognizer != null) recognizer.destroy();
+    recognizer = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(this) ? SpeechRecognizer.createOnDeviceSpeechRecognizer(this) : SpeechRecognizer.createSpeechRecognizer(this);
+    recognizer.setRecognitionListener(new RecognitionListener() {
+      @Override public void onReadyForSpeech(Bundle params) { setStatus("Listening…"); }
+      @Override public void onBeginningOfSpeech() { }
+      @Override public void onRmsChanged(float value) { }
+      @Override public void onBufferReceived(byte[] buffer) { }
+      @Override public void onEndOfSpeech() { setStatus("Transcribing…"); }
+      @Override public void onError(int error) { setStatus("Voice input unavailable (code " + error + ")."); }
+      @Override public void onResults(Bundle results) { ArrayList<String> values = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION); if (values != null && !values.isEmpty() && composer != null) { String old = composer.getText().toString().trim(); composer.setText((old.isEmpty() ? "" : old + " ") + values.get(0)); composer.setSelection(composer.length()); setStatus("Voice text added. Tap Ask when ready."); } }
+      @Override public void onPartialResults(Bundle values) { }
+      @Override public void onEvent(int type, Bundle params) { }
+    });
+    Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH); intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM); intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true); recognizer.startListening(intent);
+  }
+
+  private void removePanel() { if (panel != null && manager != null) { manager.removeView(panel); panel = null; transcript = null; transcriptScroll = null; composer = null; status = null; } }
+  @Override public void onDestroy() { if (recognizer != null) recognizer.destroy(); if (textToSpeech != null) { textToSpeech.stop(); textToSpeech.shutdown(); } worker.shutdownNow(); if (bubble != null && manager != null) manager.removeView(bubble); removePanel(); super.onDestroy(); }
+  @Override public IBinder onBind(Intent intent) { return null; }
+}

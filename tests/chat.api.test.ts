@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chatCompletionsUrl, extractCompletionText, modelsUrl, normalizeEndpoint, normalizeModelCatalog } from "../lib/chat/api";
+import { chatCompletionsUrl, combineAssistantInstructions, extractCompletionText, modelsUrl, normalizeEndpoint, normalizeModelCatalog } from "../lib/chat/api";
 
 describe("OpenAI-compatible provider URL helpers", () => {
   it("normalizes a base URL without trailing slashes", () => {
@@ -26,5 +26,10 @@ describe("OpenAI-compatible provider URL helpers", () => {
 
   it("also accepts text-style completion payloads from compatible providers", () => {
     expect(extractCompletionText(JSON.stringify({ choices: [{ text: "OK" }] }))).toBe("OK");
+  });
+
+  it("composes the global assistant personality with an optional chat-specific instruction", () => {
+    expect(combineAssistantInstructions("Warm and concise", "Use short answers")).toBe("Default assistant personality: Warm and concise\n\nConversation-specific instruction: Use short answers");
+    expect(combineAssistantInstructions("Warm and concise")).toBe("Default assistant personality: Warm and concise");
   });
 });

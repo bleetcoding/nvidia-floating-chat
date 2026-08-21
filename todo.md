@@ -29,3 +29,13 @@
 - [x] Add rewrite presets, custom rewrite instructions, generated suggestions, and selected-text replacement in the AI keyboard
 - [x] Add keyboard enable/setup guidance and validation for the Android input method
 - [x] Publish the verified Android APK as a public GitHub Release asset with a direct download link
+- [ ] Replace the compact overlay with a three-action contextual response panel inspired by the supplied reference
+- [ ] Use typed text and user-enabled, text-only Android accessibility context to draft contextual AI responses
+- [ ] Add insert, replace, copy, dismiss, and direct message-input actions to the response overlay
+- [ ] Add a default assistant personality setting in the main app for overlay and prompt recommendations
+- [ ] Add optional voice input and spoken-response controls with clear permission and privacy feedback
+- [ ] Replace the compact overlay with a scrollable three-action contextual response panel inspired by the supplied reference
+- [ ] Use typed text and user-enabled, text-only Android accessibility context to draft contextual AI responses
+- [ ] Add insert, replace, copy, dismiss, and direct message-input actions to the response overlay
+- [ ] Add a default assistant personality setting in the main app for overlay and prompt recommendations
+- [ ] Add optional voice input and spoken-response controls with clear permission and privacy feedback

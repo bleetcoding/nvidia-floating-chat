@@ -35,6 +35,10 @@ export interface ProviderSettings {
   model: string;
   lastTestedAt?: string;
   lastVerifiedModel?: string;
+  assistantPersonality?: string;
+  overlayContextEnabled?: boolean;
+  overlayVoiceEnabled?: boolean;
+  overlayPanelHeightDp?: number;
 }
 
 export interface ProviderTestResult {
@@ -54,6 +58,10 @@ export interface SelectedModelTestResult {
 export const defaultProviderSettings: ProviderSettings = {
   endpoint: DEFAULT_ENDPOINT,
   model: "",
+  assistantPersonality: "Helpful, warm, concise, and practical. Match the user’s language and give clear next steps.",
+  overlayContextEnabled: false,
+  overlayVoiceEnabled: false,
+  overlayPanelHeightDp: 380,
 };
 
 export function createId(prefix: string): string {

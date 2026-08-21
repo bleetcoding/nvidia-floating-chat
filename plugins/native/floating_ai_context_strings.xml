@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="floating_ai_context_description">Provides user-enabled text-only context for the Floating AI Chat response panel. It excludes password fields and sensitive accessibility nodes.</string>
+</resources>

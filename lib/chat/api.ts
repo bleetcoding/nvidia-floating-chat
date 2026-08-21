@@ -63,6 +63,14 @@ function messageContent(message: ChatMessage, currentAttachments: PreparedAttach
   ];
 }
 
+export function combineAssistantInstructions(assistantPersonality?: string, systemInstruction?: string): string | undefined {
+  const parts = [
+    assistantPersonality?.trim() ? `Default assistant personality: ${assistantPersonality.trim()}` : "",
+    systemInstruction?.trim() ? `Conversation-specific instruction: ${systemInstruction.trim()}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join("\n\n") : undefined;
+}
+
 function requestMessages(messages: ChatMessage[], systemInstruction?: string) {
   return [
     ...(systemInstruction?.trim() ? [{ role: "system", content: systemInstruction.trim() }] : []),
@@ -119,12 +127,14 @@ export async function generatePromptSuggestions({
   apiKey,
   messages,
   systemInstruction,
+  assistantPersonality,
   signal,
 }: {
   settings: ProviderSettings;
   apiKey: string;
   messages: ChatMessage[];
   systemInstruction?: string;
+  assistantPersonality?: string;
   signal?: AbortSignal;
 }): Promise<string[]> {
   const response = await fetch(chatCompletionsUrl(settings.endpoint), {
@@ -137,8 +147,8 @@ export async function generatePromptSuggestions({
       temperature: 0.6,
       max_tokens: 220,
       messages: [
-        { role: "system", content: "Based on the conversation, return only a JSON array of 3 to 5 concise, useful next prompts the user could send. Do not include markdown or commentary." },
-        ...requestMessages(messages, systemInstruction),
+        { role: "system", content: `Based on the conversation, return only a JSON array of 3 to 5 concise, useful next prompts the user could send. Do not include markdown or commentary. ${combineAssistantInstructions(assistantPersonality, systemInstruction) ?? ""}`.trim() },
+        ...requestMessages(messages),
       ],
     }),
   });
@@ -159,6 +169,7 @@ export async function streamChatCompletion({
   messages,
   currentAttachments,
   systemInstruction,
+  assistantPersonality,
   signal,
   onDelta,
 }: {
@@ -167,6 +178,7 @@ export async function streamChatCompletion({
   messages: ChatMessage[];
   currentAttachments: PreparedAttachment[];
   systemInstruction?: string;
+  assistantPersonality?: string;
   signal: AbortSignal;
   onDelta: (delta: string) => void;
 }): Promise<void> {
@@ -177,7 +189,7 @@ export async function streamChatCompletion({
     body: JSON.stringify({
       model: settings.model.trim(),
       messages: [
-        ...(systemInstruction?.trim() ? [{ role: "system", content: systemInstruction.trim() }] : []),
+        ...(combineAssistantInstructions(assistantPersonality, systemInstruction) ? [{ role: "system", content: combineAssistantInstructions(assistantPersonality, systemInstruction)! }] : []),
         ...messages.map((message, index) => ({
           role: message.role,
           content: index === messages.length - 1 && message.role === "user" ? messageContent(message, currentAttachments) : message.content,

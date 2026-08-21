@@ -5,6 +5,15 @@ export type BubbleAppearance = {
   color: string;
 };
 
+export type OverlayPreferences = {
+  title: string;
+  excerpt: string;
+  personality: string;
+  contextEnabled: boolean;
+  voiceEnabled: boolean;
+  panelHeightDp: number;
+};
+
 export const defaultBubbleAppearance: BubbleAppearance = {
   sizeDp: 58,
   color: "#76B900",
@@ -19,6 +28,9 @@ type FloatingBubbleBridge = {
   stopBubble: () => Promise<boolean>;
   updateAppearance: (sizeDp: number, color: string) => Promise<boolean>;
   updateOverlayPreview: (title: string, excerpt: string) => Promise<boolean>;
+  updateOverlayPreferences: (title: string, excerpt: string, personality: string, contextEnabled: boolean, voiceEnabled: boolean, panelHeightDp: number) => Promise<boolean>;
+  openAccessibilitySettings: () => Promise<boolean>;
+  isAccessibilityEnabled: () => Promise<boolean>;
 };
 
 const bridge = NativeModules.FloatingBubble as FloatingBubbleBridge | undefined;
@@ -48,5 +60,14 @@ export const floatingBubble = {
   },
   async updateOverlayPreview(title: string, excerpt: string): Promise<boolean> {
     return bridge ? bridge.updateOverlayPreview(title, excerpt) : false;
+  },
+  async updateOverlayPreferences(preferences: OverlayPreferences): Promise<boolean> {
+    return bridge ? bridge.updateOverlayPreferences(preferences.title, preferences.excerpt, preferences.personality, preferences.contextEnabled, preferences.voiceEnabled, preferences.panelHeightDp) : false;
+  },
+  async openAccessibilitySettings(): Promise<boolean> {
+    return bridge ? bridge.openAccessibilitySettings() : false;
+  },
+  async isAccessibilityEnabled(): Promise<boolean> {
+    return bridge ? bridge.isAccessibilityEnabled() : false;
   },
 };

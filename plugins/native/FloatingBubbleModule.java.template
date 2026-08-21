@@ -1,0 +1,42 @@
+package __PACKAGE__;
+
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
+import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.bridge.ReactContextBaseJavaModule;
+import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.WritableMap;
+
+public class FloatingBubbleModule extends ReactContextBaseJavaModule {
+  FloatingBubbleModule(ReactApplicationContext context) { super(context); }
+  @Override public String getName() { return "FloatingBubble"; }
+  @ReactMethod public void isOverlayPermissionGranted(Promise promise) { promise.resolve(Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(getReactApplicationContext())); }
+  @ReactMethod public void isBubbleEnabled(Promise promise) { promise.resolve(prefs().getBoolean("enabled", false)); }
+  @ReactMethod public void isAccessibilityEnabled(Promise promise) { promise.resolve(FloatingTextContextService.enabled(getReactApplicationContext())); }
+  @ReactMethod public void getAppearance(Promise promise) { WritableMap result = Arguments.createMap(); result.putInt("sizeDp", prefs().getInt("sizeDp", 58)); result.putString("color", prefs().getString("color", "#76B900")); promise.resolve(result); }
+
+  @ReactMethod public void updateAppearance(double sizeDp, String color, Promise promise) {
+    if (color == null || !color.matches("^#[0-9A-Fa-f]{6}$")) { promise.reject("INVALID_BUBBLE_COLOR", "Bubble color must be a six-digit hex color."); return; }
+    prefs().edit().putInt("sizeDp", Math.max(42, Math.min(92, (int) Math.round(sizeDp)))).putString("color", color.toUpperCase()).apply(); refresh(); promise.resolve(true);
+  }
+  @ReactMethod public void updateOverlayPreview(String title, String excerpt, Promise promise) { prefs().edit().putString("overlayTitle", title == null ? "Floating AI Chat" : title).putString("overlayExcerpt", excerpt == null ? "" : excerpt).apply(); refresh(); promise.resolve(true); }
+  @ReactMethod public void updateOverlayPreferences(String title, String excerpt, String personality, boolean contextEnabled, boolean voiceEnabled, double panelHeightDp, Promise promise) {
+    prefs().edit().putString("overlayTitle", title == null ? "Floating AI Chat" : title).putString("overlayExcerpt", excerpt == null ? "" : excerpt).putString("personality", personality == null ? "Helpful, warm, concise, and practical." : personality).putBoolean("contextEnabled", contextEnabled).putBoolean("voiceEnabled", voiceEnabled).putInt("panelHeightDp", Math.max(300, Math.min(560, (int) Math.round(panelHeightDp)))).apply(); refresh(); promise.resolve(true);
+  }
+  @ReactMethod public void requestOverlayPermission(Promise promise) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(getReactApplicationContext())) { promise.resolve(true); return; }
+    Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getReactApplicationContext().getPackageName())); intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); getReactApplicationContext().startActivity(intent); promise.resolve(false);
+  }
+  @ReactMethod public void openAccessibilitySettings(Promise promise) { Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS); intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); getReactApplicationContext().startActivity(intent); promise.resolve(true); }
+  @ReactMethod public void startBubble(Promise promise) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(getReactApplicationContext())) { promise.reject("OVERLAY_PERMISSION_REQUIRED", "Display-over-other-apps permission is required."); return; }
+    Intent intent = new Intent(getReactApplicationContext(), FloatingBubbleService.class); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) getReactApplicationContext().startForegroundService(intent); else getReactApplicationContext().startService(intent); prefs().edit().putBoolean("enabled", true).apply(); promise.resolve(true);
+  }
+  @ReactMethod public void stopBubble(Promise promise) { getReactApplicationContext().stopService(new Intent(getReactApplicationContext(), FloatingBubbleService.class)); prefs().edit().putBoolean("enabled", false).apply(); promise.resolve(true); }
+  private android.content.SharedPreferences prefs() { return getReactApplicationContext().getSharedPreferences("floating_bubble", 0); }
+  private void refresh() { if (prefs().getBoolean("enabled", false)) { Intent refresh = new Intent(getReactApplicationContext(), FloatingBubbleService.class); refresh.setAction("__PACKAGE__.REFRESH_FLOATING_BUBBLE"); getReactApplicationContext().startService(refresh); } }
+}

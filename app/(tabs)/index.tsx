@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  PermissionsAndroid,
   Platform,
   StyleSheet,
   Text,
@@ -93,18 +94,21 @@ export default function HomeScreen() {
   const [bubbleAppearance, setBubbleAppearance] = useState<BubbleAppearance>(defaultBubbleAppearance);
   const [showNewChatSetup, setShowNewChatSetup] = useState(false);
   const [keyboardEnabled, setKeyboardEnabled] = useState(false);
+  const [accessibilityEnabled, setAccessibilityEnabled] = useState(false);
   const hydrated = useRef(false);
 
   useEffect(() => {
-    Promise.all([loadProviderSettings(), loadApiKey(), loadConversations(), floatingBubble.isEnabled(), floatingBubble.getAppearance(), aiKeyboard.isEnabled()])
-      .then(([savedSettings, savedKey, savedConversations, savedBubbleEnabled, savedBubbleAppearance, savedKeyboardEnabled]) => {
+    Promise.all([loadProviderSettings(), loadApiKey(), loadConversations(), floatingBubble.isEnabled(), floatingBubble.getAppearance(), aiKeyboard.isEnabled(), floatingBubble.isAccessibilityEnabled()])
+      .then(([savedSettings, savedKey, savedConversations, savedBubbleEnabled, savedBubbleAppearance, savedKeyboardEnabled, savedAccessibilityEnabled]) => {
         setSettings(savedSettings);
         setApiKey(savedKey);
         setConversations(savedConversations.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
         setBubbleEnabled(savedBubbleEnabled);
         setBubbleAppearance(savedBubbleAppearance);
         setKeyboardEnabled(savedKeyboardEnabled);
+        setAccessibilityEnabled(savedAccessibilityEnabled);
         void syncKeyboardConfiguration(savedSettings, savedKey);
+        void floatingBubble.updateOverlayPreferences({ title: "Floating AI Chat", excerpt: "Tap a response action after enabling the bubble.", personality: savedSettings.assistantPersonality ?? defaultProviderSettings.assistantPersonality ?? "", contextEnabled: Boolean(savedSettings.overlayContextEnabled), voiceEnabled: Boolean(savedSettings.overlayVoiceEnabled), panelHeightDp: savedSettings.overlayPanelHeightDp ?? 380 });
       })
       .finally(() => {
         hydrated.current = true;
@@ -124,7 +128,9 @@ export default function HomeScreen() {
 
   const saveSettings = async () => {
     const normalized = { ...settings, endpoint: settings.endpoint.trim().replace(/\/+$/, ""), model: settings.model.trim() };
-    await Promise.all([saveProviderSettings(normalized), saveApiKey(apiKey), syncKeyboardConfiguration(normalized, apiKey)]);
+    const overlayTitle = activeConversation?.title || "Floating AI Chat";
+    const overlayExcerpt = activeConversation?.messages.at(-1)?.content || activeConversation?.systemInstruction || "Tap a response action after enabling the bubble.";
+    await Promise.all([saveProviderSettings(normalized), saveApiKey(apiKey), syncKeyboardConfiguration(normalized, apiKey), floatingBubble.updateOverlayPreferences({ title: overlayTitle, excerpt: overlayExcerpt, personality: normalized.assistantPersonality ?? defaultProviderSettings.assistantPersonality ?? "", contextEnabled: Boolean(normalized.overlayContextEnabled), voiceEnabled: Boolean(normalized.overlayVoiceEnabled), panelHeightDp: normalized.overlayPanelHeightDp ?? 380 })]);
     setSettings(normalized);
     Alert.alert("Saved locally", "Your API key is kept in device secure storage.");
   };
@@ -243,6 +249,29 @@ export default function HomeScreen() {
     setTimeout(() => { void aiKeyboard.isEnabled().then(setKeyboardEnabled); }, 1200);
   };
 
+  const changeContextCapture = async (enabled: boolean) => {
+    setSettings((current) => ({ ...current, overlayContextEnabled: enabled }));
+    if (!enabled || !floatingBubble.isSupported) return;
+    const serviceEnabled = await floatingBubble.isAccessibilityEnabled();
+    setAccessibilityEnabled(serviceEnabled);
+    if (!serviceEnabled) {
+      await floatingBubble.openAccessibilitySettings();
+      Alert.alert("Enable text context", "In Android Accessibility settings, enable Floating AI Chat Context. It reads only visible non-password text when you tap a response action; nothing is captured continuously.");
+      setTimeout(() => { void floatingBubble.isAccessibilityEnabled().then(setAccessibilityEnabled); }, 1300);
+    }
+  };
+
+  const changeVoice = async (enabled: boolean) => {
+    if (enabled && Platform.OS === "android") {
+      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, { title: "Use microphone for voice prompts", message: "Floating AI Chat uses the microphone only after you tap its voice button.", buttonPositive: "Allow", buttonNegative: "Not now" });
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        Alert.alert("Microphone not enabled", "Voice input remains off until microphone access is allowed.");
+        return;
+      }
+    }
+    setSettings((current) => ({ ...current, overlayVoiceEnabled: enabled }));
+  };
+
   if (!isReady) {
     return <ScreenContainer containerClassName="bg-background" className="items-center justify-center"><StatusBar style="light" /><ActivityIndicator size="large" color={colors.primary} /><Text style={styles.loadingText}>Loading your local workspace…</Text></ScreenContainer>;
   }
@@ -252,7 +281,7 @@ export default function HomeScreen() {
       <StatusBar style="light" />
       {screen === "library" ? <ConversationLibrary conversations={conversations} configured={configured} bubbleEnabled={bubbleEnabled} bubbleAppearance={bubbleAppearance} onCreate={() => setShowNewChatSetup(true)} onOpen={openConversation} onDelete={deleteConversation} onOpenSettings={() => setScreen("settings")} onToggleBubble={() => void toggleBubble()} onAppearanceChange={(appearance) => void applyBubbleAppearance(appearance)} /> : null}
       {screen === "conversation" ? <ConversationScreen conversation={activeConversation} settings={settings} apiKey={apiKey} configured={configured} onBack={() => setScreen("library")} onOpenSettings={() => setScreen("settings")} onUpdateMessages={updateMessages} /> : null}
-      {screen === "settings" ? <SettingsScreen settings={settings} apiKey={apiKey} showKey={showKey} isTesting={isTesting} result={testResult} isTestingModel={isTestingModel} modelTestResult={modelTestResult} discoveredModels={discoveredModels} keyboardEnabled={keyboardEnabled} onBack={() => setScreen("library")} onSettingsChange={updateSettings} onApiKeyChange={setApiKey} onShowKey={() => setShowKey((current) => !current)} onTest={() => void runTest()} onTestModel={() => void runSelectedModelTest()} onKeyboardSettings={() => void openKeyboardSettings()} onSave={() => void saveSettings()} /> : null}
+      {screen === "settings" ? <SettingsScreen settings={settings} apiKey={apiKey} showKey={showKey} isTesting={isTesting} result={testResult} isTestingModel={isTestingModel} modelTestResult={modelTestResult} discoveredModels={discoveredModels} keyboardEnabled={keyboardEnabled} accessibilityEnabled={accessibilityEnabled} onBack={() => setScreen("library")} onSettingsChange={updateSettings} onApiKeyChange={setApiKey} onShowKey={() => setShowKey((current) => !current)} onTest={() => void runTest()} onTestModel={() => void runSelectedModelTest()} onKeyboardSettings={() => void openKeyboardSettings()} onContextCaptureChange={(enabled) => void changeContextCapture(enabled)} onVoiceChange={(enabled) => void changeVoice(enabled)} onSave={() => void saveSettings()} /> : null}
       <NewChatSetup visible={showNewChatSetup} onClose={() => setShowNewChatSetup(false)} onCreate={createNewConversation} />
     </ScreenContainer>
   );
@@ -287,7 +316,7 @@ function ConversationScreen({ conversation, settings, apiKey, configured, onBack
     ideasForMessage.current = lastMessage.id;
     const controller = new AbortController();
     setLoadingIdeas(true);
-    void generatePromptSuggestions({ settings, apiKey, messages: conversation.messages, systemInstruction: conversation.systemInstruction, signal: controller.signal })
+    void generatePromptSuggestions({ settings, apiKey, messages: conversation.messages, systemInstruction: conversation.systemInstruction, assistantPersonality: settings.assistantPersonality, signal: controller.signal })
       .then(setPromptIdeas)
       .catch(() => setPromptIdeas([]))
       .finally(() => setLoadingIdeas(false));
@@ -320,7 +349,7 @@ function ConversationScreen({ conversation, settings, apiKey, configured, onBack
     abortController.current = controller;
     let response = "";
     try {
-      await streamChatCompletion({ settings, apiKey, messages: [...conversation.messages, userMessage], currentAttachments: pendingAttachments, systemInstruction: conversation.systemInstruction, signal: controller.signal, onDelta: (delta: string) => { response += delta; onUpdateMessages(conversation.id, [...conversation.messages, userMessage, { ...assistantMessage, content: response }]); } });
+      await streamChatCompletion({ settings, apiKey, messages: [...conversation.messages, userMessage], currentAttachments: pendingAttachments, systemInstruction: conversation.systemInstruction, assistantPersonality: settings.assistantPersonality, signal: controller.signal, onDelta: (delta: string) => { response += delta; onUpdateMessages(conversation.id, [...conversation.messages, userMessage, { ...assistantMessage, content: response }]); } });
       if (!response) onUpdateMessages(conversation.id, [...conversation.messages, userMessage, { ...assistantMessage, content: "The model completed without returning text." }]);
     } catch (error) {
       const message = error instanceof Error && error.name === "AbortError" ? `${response || "Response"} [stopped]` : `I could not complete that request: ${error instanceof Error ? error.message : "Unknown provider error"}`;
@@ -344,7 +373,7 @@ function MessageCard({ message, onCopy, onEdit, onResend }: { message: ChatMessa
   return <View style={[styles.messageWrap, isUser ? styles.messageWrapUser : styles.messageWrapAssistant]}><View style={[styles.messageBubble, isUser ? styles.userBubble : styles.assistantBubble]}>{message.content ? <Text selectable style={[styles.messageText, isUser ? styles.userText : styles.assistantText]}>{message.content}</Text> : <View style={styles.typingRow}><View style={styles.typingDot} /><View style={styles.typingDot} /><View style={styles.typingDot} /></View>}{message.attachments?.length ? <View style={styles.sentAttachments}>{message.attachments.map((attachment) => <Text key={attachment.id} style={styles.sentAttachmentText}>⌁ {attachmentSummary(attachment)}: {attachment.name}</Text>)}</View> : null}</View><View style={styles.messageActions}><TouchableOpacity accessibilityLabel="Copy message" onPress={onCopy}><Text style={styles.messageActionText}>Copy</Text></TouchableOpacity>{onEdit ? <TouchableOpacity accessibilityLabel="Edit message" onPress={onEdit}><Text style={styles.messageActionText}>Edit</Text></TouchableOpacity> : null}{onResend ? <TouchableOpacity accessibilityLabel="Regenerate response" onPress={onResend}><Text style={styles.messageActionText}>Retry</Text></TouchableOpacity> : null}</View></View>;
 }
 
-function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestingModel, modelTestResult, discoveredModels, keyboardEnabled, onBack, onSettingsChange, onApiKeyChange, onShowKey, onTest, onTestModel, onKeyboardSettings, onSave }: { settings: ProviderSettings; apiKey: string; showKey: boolean; isTesting: boolean; result: ProviderTestResult | null; isTestingModel: boolean; modelTestResult: SelectedModelTestResult | null; discoveredModels: string[]; keyboardEnabled: boolean; onBack: () => void; onSettingsChange: (settings: ProviderSettings) => void; onApiKeyChange: (apiKey: string) => void; onShowKey: () => void; onTest: () => void; onTestModel: () => void; onKeyboardSettings: () => void; onSave: () => void }) {
+function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestingModel, modelTestResult, discoveredModels, keyboardEnabled, accessibilityEnabled, onBack, onSettingsChange, onApiKeyChange, onShowKey, onTest, onTestModel, onKeyboardSettings, onContextCaptureChange, onVoiceChange, onSave }: { settings: ProviderSettings; apiKey: string; showKey: boolean; isTesting: boolean; result: ProviderTestResult | null; isTestingModel: boolean; modelTestResult: SelectedModelTestResult | null; discoveredModels: string[]; keyboardEnabled: boolean; accessibilityEnabled: boolean; onBack: () => void; onSettingsChange: (settings: ProviderSettings) => void; onApiKeyChange: (apiKey: string) => void; onShowKey: () => void; onTest: () => void; onTestModel: () => void; onKeyboardSettings: () => void; onContextCaptureChange: (enabled: boolean) => void; onVoiceChange: (enabled: boolean) => void; onSave: () => void }) {
   const [modelSearch, setModelSearch] = useState("");
   const matchingModels = discoveredModels.filter((model) => model.toLowerCase().includes(modelSearch.trim().toLowerCase()));
 
@@ -357,7 +386,17 @@ function SettingsScreen({ settings, apiKey, showKey, isTesting, result, isTestin
       {discoveredModels.length ? <View style={styles.modelList}><Text style={styles.discoveredLabel}>LIVE MODEL CATALOG · {discoveredModels.length}</Text><Text style={styles.helperText}>The provider returns models for several tasks. Select one, then use Test selected model; only a passing chat test enables messages.</Text><TextInput accessibilityLabel="Search live model catalog" autoCapitalize="none" autoCorrect={false} value={modelSearch} onChangeText={setModelSearch} placeholder="Search model IDs" placeholderTextColor={colors.muted} style={styles.input} />{matchingModels.length ? matchingModels.map((model) => <TouchableOpacity key={model} accessibilityLabel={`Select model ${model}`} onPress={() => onSettingsChange({ ...settings, model })} style={[styles.modelChip, settings.model === model && styles.modelChipSelected]}><Text numberOfLines={1} style={[styles.modelChipText, settings.model === model && styles.modelChipTextSelected]}>{model}</Text></TouchableOpacity>) : <Text style={styles.helperText}>No live model IDs match this search.</Text>}</View> : null}
       <TouchableOpacity accessibilityLabel="Refresh live model catalog" disabled={isTesting} onPress={onTest} style={[styles.testButton, isTesting && styles.buttonDisabled]}>{isTesting ? <ActivityIndicator color={colors.text} /> : <Text style={styles.testButtonText}>Refresh live model catalog</Text>}</TouchableOpacity>{result ? <View style={[styles.resultCard, result.ok ? styles.resultSuccess : styles.resultError]}><Text style={[styles.resultHeading, result.ok ? styles.resultHeadingSuccess : styles.resultHeadingError]}>{result.ok ? "Connection verified" : "Connection not verified"}</Text><Text style={styles.resultMessage}>{result.message}</Text></View> : null}
       <View style={keyboardStyles.card}><View style={keyboardStyles.heading}><View style={styles.flex}><Text style={styles.privacyTitle}>Floating AI Keyboard</Text><Text style={styles.privacyText}>{keyboardEnabled ? "Enabled in Android. Select it from your keyboard switcher to use rewrites and grammar fixes." : "Enable it in Android settings after saving a tested model. It never processes password or PIN fields."}</Text></View><View style={[keyboardStyles.status, keyboardEnabled && keyboardStyles.statusOn]}><Text style={keyboardStyles.statusText}>{keyboardEnabled ? "ON" : "SET UP"}</Text></View></View><TouchableOpacity accessibilityLabel="Open Android keyboard settings" onPress={onKeyboardSettings} style={keyboardStyles.button}><Text style={keyboardStyles.buttonText}>Open keyboard settings</Text></TouchableOpacity></View>
-      <View style={styles.privacyCard}><Text style={styles.privacyTitle}>Privacy checkpoint</Text><Text style={styles.privacyText}>Refreshing the catalog sends only an authenticated request to the provider’s model list. Messages and chosen attachments are sent only when you press Send.</Text></View>
+      <View style={overlaySettingsStyles.card}>
+        <Text style={styles.privacyTitle}>Contextual floating assistant</Text>
+        <Text style={styles.privacyText}>This controls the small overlay above the app you are using. It creates a response only after you tap an action.</Text>
+        <Text style={overlaySettingsStyles.label}>DEFAULT PERSONALITY</Text>
+        <TextInput accessibilityLabel="Default assistant personality" multiline value={settings.assistantPersonality ?? defaultProviderSettings.assistantPersonality} onChangeText={(assistantPersonality) => onSettingsChange({ ...settings, assistantPersonality })} placeholder="Helpful, warm, concise…" placeholderTextColor={colors.muted} style={overlaySettingsStyles.personalityInput} />
+        <View style={overlaySettingsStyles.settingRow}><View style={styles.flex}><Text style={overlaySettingsStyles.rowTitle}>Use visible screen text</Text><Text style={overlaySettingsStyles.rowDetail}>{accessibilityEnabled ? "Accessibility context is enabled. Password fields and sensitive nodes are excluded." : "Requires one Android Accessibility toggle. Text is read only after you tap an overlay action."}</Text></View><TouchableOpacity accessibilityLabel="Toggle visible screen text context" onPress={() => onContextCaptureChange(!settings.overlayContextEnabled)} style={[overlaySettingsStyles.toggle, settings.overlayContextEnabled && overlaySettingsStyles.toggleOn]}><View style={[overlaySettingsStyles.knob, settings.overlayContextEnabled && overlaySettingsStyles.knobOn]} /></TouchableOpacity></View>
+        <Text style={overlaySettingsStyles.label}>PANEL CAPACITY</Text>
+        <View style={overlaySettingsStyles.capacityRow}>{[{ label: "Compact", height: 300 }, { label: "Standard", height: 380 }, { label: "Extended", height: 520 }].map((option) => <TouchableOpacity key={option.height} accessibilityLabel={`Set overlay panel to ${option.label}`} onPress={() => onSettingsChange({ ...settings, overlayPanelHeightDp: option.height })} style={[overlaySettingsStyles.capacityPill, (settings.overlayPanelHeightDp ?? 380) === option.height && overlaySettingsStyles.capacityPillActive]}><Text style={[overlaySettingsStyles.capacityText, (settings.overlayPanelHeightDp ?? 380) === option.height && overlaySettingsStyles.capacityTextActive]}>{option.label}</Text></TouchableOpacity>)}</View>
+        <View style={overlaySettingsStyles.settingRow}><View style={styles.flex}><Text style={overlaySettingsStyles.rowTitle}>Voice controls</Text><Text style={overlaySettingsStyles.rowDetail}>Show a microphone for short spoken prompts and a speaker action for AI replies.</Text></View><TouchableOpacity accessibilityLabel="Toggle overlay voice controls" onPress={() => onVoiceChange(!settings.overlayVoiceEnabled)} style={[overlaySettingsStyles.toggle, settings.overlayVoiceEnabled && overlaySettingsStyles.toggleOn]}><View style={[overlaySettingsStyles.knob, settings.overlayVoiceEnabled && overlaySettingsStyles.knobOn]} /></TouchableOpacity></View>
+      </View>
+      <View style={styles.privacyCard}><Text style={styles.privacyTitle}>Privacy checkpoint</Text><Text style={styles.privacyText}>Messages, visible text context, and spoken prompts are sent to your selected provider only after you tap Send, Ask, or a response action. Password fields and accessibility nodes marked sensitive are excluded.</Text></View>
     </View>} ListFooterComponent={<TouchableOpacity accessibilityLabel="Save provider settings" onPress={onSave} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Save connection settings</Text></TouchableOpacity>} />
   </View>;
 }
@@ -383,6 +422,24 @@ const keyboardStyles = StyleSheet.create({
   statusText: { color: colors.text, fontSize: 9, fontWeight: "900", letterSpacing: 0.7 },
   button: { alignItems: "center", borderColor: colors.primary, borderRadius: 12, borderWidth: 1, marginTop: 13, minHeight: 43, justifyContent: "center" },
   buttonText: { color: colors.lime, fontSize: 13, fontWeight: "800" },
+});
+
+const overlaySettingsStyles = StyleSheet.create({
+  card: { backgroundColor: "#101C17", borderColor: "#426B2B", borderRadius: 16, borderWidth: 1, marginTop: 18, padding: 15 },
+  label: { color: colors.muted, fontSize: 10, fontWeight: "800", letterSpacing: 1, marginBottom: 8, marginTop: 16 },
+  personalityInput: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 13, borderWidth: 1, color: colors.text, fontSize: 13, lineHeight: 19, minHeight: 86, padding: 11, textAlignVertical: "top" },
+  settingRow: { alignItems: "center", borderTopColor: colors.border, borderTopWidth: 1, flexDirection: "row", gap: 10, marginTop: 16, paddingTop: 15 },
+  rowTitle: { color: colors.text, fontSize: 13, fontWeight: "800", marginBottom: 3 },
+  rowDetail: { color: colors.muted, fontSize: 11, lineHeight: 16 },
+  toggle: { backgroundColor: "#3A4840", borderRadius: 18, height: 29, justifyContent: "center", paddingHorizontal: 3, width: 52 },
+  toggleOn: { backgroundColor: colors.primary },
+  knob: { backgroundColor: colors.text, borderRadius: 12, height: 23, width: 23 },
+  knobOn: { alignSelf: "flex-end" },
+  capacityRow: { flexDirection: "row", gap: 7 },
+  capacityPill: { alignItems: "center", backgroundColor: colors.elevated, borderColor: colors.border, borderRadius: 11, borderWidth: 1, flex: 1, minHeight: 38, justifyContent: "center", paddingHorizontal: 4 },
+  capacityPillActive: { backgroundColor: "#263D1E", borderColor: colors.primary },
+  capacityText: { color: colors.muted, fontSize: 10, fontWeight: "700" },
+  capacityTextActive: { color: colors.lime },
 });
 
 const bubbleStyles = StyleSheet.create({
