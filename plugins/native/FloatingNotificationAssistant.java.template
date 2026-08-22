@@ -65,7 +65,7 @@ public final class FloatingNotificationAssistant {
     JSONArray current = memory(context); JSONArray next = new JSONArray();
     int first = Math.max(0, current.length() - 9);
     for (int index = first; index < current.length(); index++) next.put(current.optJSONObject(index));
-    next.put(new JSONObject().put("role", role).put("content", clean));
+    try { next.put(new JSONObject().put("role", role).put("content", clean)); } catch (Exception ignored) { return; }
     prefs(context).edit().putString("notificationAssistantMemory", next.toString()).apply();
   }
 
