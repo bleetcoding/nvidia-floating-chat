@@ -30,6 +30,9 @@ function withBubbleManifest(config) {
       services.push({ $: { "android:name": ".FloatingTextContextService", "android:permission": "android.permission.BIND_ACCESSIBILITY_SERVICE", "android:exported": "true", "android:label": "Floating AI Chat Context" }, "intent-filter": [{ action: [{ $: { "android:name": "android.accessibilityservice.AccessibilityService" } }] }], "meta-data": [{ $: { "android:name": "android.accessibilityservice", "android:resource": "@xml/floating_ai_context_service" } }] });
     }
     application.service = services;
+    const receivers = application.receiver || [];
+    if (!receivers.some((receiver) => receiver.$?.["android:name"] === ".FloatingAIReplyReceiver")) receivers.push({ $: { "android:name": ".FloatingAIReplyReceiver", "android:exported": "false" } });
+    application.receiver = receivers;
     return config;
   });
 }
@@ -68,6 +71,8 @@ function withBubbleNativeSources(config) {
     fs.mkdirSync(path.join(resourcesDirectory, "values"), { recursive: true });
     fs.writeFileSync(path.join(javaDirectory, "FloatingBubbleService.java"), applyTemplate("FloatingBubbleService.java.template", packageName, scheme));
     fs.writeFileSync(path.join(javaDirectory, "FloatingTextContextService.java"), applyTemplate("FloatingTextContextService.java.template", packageName, scheme));
+    fs.writeFileSync(path.join(javaDirectory, "FloatingNotificationAssistant.java"), applyTemplate("FloatingNotificationAssistant.java.template", packageName, scheme));
+    fs.writeFileSync(path.join(javaDirectory, "FloatingAIReplyReceiver.java"), applyTemplate("FloatingAIReplyReceiver.java.template", packageName, scheme));
     fs.writeFileSync(path.join(javaDirectory, "FloatingBubbleModule.java"), applyTemplate("FloatingBubbleModule.java.template", packageName, scheme));
     fs.writeFileSync(path.join(javaDirectory, "FloatingBubblePackage.java"), packageSource(packageName));
     fs.copyFileSync(path.join(nativeRoot, "floating_ai_context_service.xml"), path.join(resourcesDirectory, "xml", "floating_ai_context_service.xml"));
@@ -87,4 +92,4 @@ function withBubblePackage(config) {
   });
 }
 
-module.exports = createRunOncePlugin((config) => withBubblePackage(withBubbleNativeSources(withBubbleManifest(config))), PLUGIN_NAME, "2.2.0");
+module.exports = createRunOncePlugin((config) => withBubblePackage(withBubbleNativeSources(withBubbleManifest(config))), PLUGIN_NAME, "2.3.0");

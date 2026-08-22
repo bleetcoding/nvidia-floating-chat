@@ -57,3 +57,10 @@
 - [x] Rebuild the native keyboard action strip so AI controls are visible while typing in third-party apps
 - [x] Improve active-field text capture and one-tap rewrite-and-replace behavior in the native keyboard
 - [x] Add clearer in-app keyboard enable and switch guidance for using Floating AI Keyboard instead of Gboard
+- [x] Diagnose the released keyboard activation path so Floating AI Keyboard can be selected instead of Gboard in a text field
+- [x] Replace the visible keyboard quick-action surface with Translation, Rewrite, Reply, Grammar, Undo, and Redo
+- [x] Add a small scrollable personality picker with named presets and a custom name plus instruction flow
+- [x] Add active-editor undo and redo support to the native keyboard
+- [x] Add an opt-in text-only screen-context notification assistant with Leave and Respond actions
+- [x] Persist notification-assistant conversation memory locally and support direct notification replies
+- [x] Add vision-capable OpenAI-compatible provider requests for intentionally attached images while keeping automatic context text-only

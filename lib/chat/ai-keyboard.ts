@@ -4,6 +4,8 @@ type NativeKeyboardBridge = {
   updateConfiguration: (endpoint: string, model: string, apiKey: string, personality: string, keyboardHeightDp: number, keyboardKeyScale: number, keyboardActionRows: number, contextPromptDelayMs: number) => Promise<boolean>;
   openSettings: () => Promise<boolean>;
   isEnabled: () => Promise<boolean>;
+  isSelected: () => Promise<boolean>;
+  openPicker: () => Promise<boolean>;
 };
 
 const bridge = NativeModules.FloatingAIKeyboard as NativeKeyboardBridge | undefined;
@@ -18,5 +20,11 @@ export const aiKeyboard = {
   },
   async isEnabled(): Promise<boolean> {
     return bridge ? bridge.isEnabled() : false;
+  },
+  async isSelected(): Promise<boolean> {
+    return bridge ? bridge.isSelected() : false;
+  },
+  async openPicker(): Promise<boolean> {
+    return bridge ? bridge.openPicker() : false;
   },
 };

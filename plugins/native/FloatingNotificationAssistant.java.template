@@ -1,0 +1,107 @@
+package __PACKAGE__;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.RemoteInput;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+public final class FloatingNotificationAssistant {
+  static final String ACTION_REPLY = "__PACKAGE__.FLOATING_AI_NOTIFICATION_REPLY";
+  static final String ACTION_LEAVE = "__PACKAGE__.FLOATING_AI_NOTIFICATION_LEAVE";
+  static final String EXTRA_REPLY = "floating_ai_notification_reply";
+  private static final String PREFS = "floating_bubble";
+  private static final String CHANNEL_ID = "floating_ai_context_replies";
+  private static final int NOTIFICATION_ID = 743;
+  private static final Handler MAIN = new Handler(Looper.getMainLooper());
+  private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
+  private static String pendingText = "";
+  private static int pendingGeneration = 0;
+  private FloatingNotificationAssistant() { }
+
+  private static android.content.SharedPreferences prefs(Context context) { return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
+  private static String plain(String value) { if (value == null) return ""; String tick = Character.toString((char) 96); String output = value.replace(tick + tick + tick, "").replace(tick, "").replace("**", "").replace("__", "").replace("*", "").replace("_", "").replace("|", " ").replace("# ", ""); while (output.contains("  ")) output = output.replace("  ", " "); return output.trim(); }
+
+  public static void schedule(Context context) {
+    if (!prefs(context).getBoolean("notificationAssistantEnabled", false)) return;
+    String visible = plain(FloatingTextContextService.visibleText(1400));
+    if (visible.length() < 24) return;
+    if (!visible.equals(pendingText)) { pendingText = visible; pendingGeneration++; }
+    final int generation = pendingGeneration;
+    MAIN.postDelayed(() -> {
+      if (generation != pendingGeneration || !prefs(context).getBoolean("notificationAssistantEnabled", false)) return;
+      String stable = plain(FloatingTextContextService.visibleText(1400));
+      if (!stable.equals(pendingText) || stable.length() < 24) { schedule(context); return; }
+      String previous = prefs(context).getString("notificationAssistantLastContext", "");
+      long lastTime = prefs(context).getLong("notificationAssistantLastAt", 0L);
+      if (stable.equals(previous) || SystemClock.elapsedRealtime() - lastTime < 15000L) return;
+      request(context, stable, "");
+    }, 6500L);
+  }
+
+  public static void reply(Context context, String reply) { if (reply == null || reply.trim().isEmpty()) return; request(context, plain(FloatingTextContextService.visibleText(1400)), plain(reply)); }
+  public static void leave(Context context) { ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(NOTIFICATION_ID); }
+
+  private static JSONArray memory(Context context) {
+    try { return new JSONArray(prefs(context).getString("notificationAssistantMemory", "[]")); } catch (Exception ignored) { return new JSONArray(); }
+  }
+  private static void addMemory(Context context, String role, String value) {
+    String clean = plain(value); if (clean.isEmpty()) return;
+    JSONArray current = memory(context); JSONArray next = new JSONArray();
+    int first = Math.max(0, current.length() - 9);
+    for (int index = first; index < current.length(); index++) next.put(current.optJSONObject(index));
+    next.put(new JSONObject().put("role", role).put("content", clean));
+    prefs(context).edit().putString("notificationAssistantMemory", next.toString()).apply();
+  }
+
+  private static void request(Context context, String visibleText, String directReply) {
+    if (!prefs(context).getBoolean("notificationAssistantEnabled", false)) return;
+    Context appContext = context.getApplicationContext();
+    String userText = directReply.isEmpty() ? "Permitted screen text: " + visibleText : "User reply from notification: " + directReply + " Permitted current screen text: " + visibleText;
+    if (directReply.isEmpty()) prefs(appContext).edit().putString("notificationAssistantLastContext", visibleText).putLong("notificationAssistantLastAt", SystemClock.elapsedRealtime()).apply();
+    addMemory(appContext, "user", userText);
+    post(appContext, "Thinking about the permitted text…", true);
+    WORKER.execute(() -> {
+      try {
+        String endpoint = FloatingAIKeyboardConfig.get(appContext, "endpoint"); String model = FloatingAIKeyboardConfig.get(appContext, "model"); String apiKey = FloatingAIKeyboardConfig.get(appContext, "apiKey");
+        if (endpoint.isEmpty() || model.isEmpty() || apiKey.isEmpty()) throw new Exception("Save a tested model in Floating AI Chat first.");
+        if (!endpoint.endsWith("/chat/completions")) endpoint = endpoint.replaceAll("/+$", "") + "/chat/completions";
+        JSONObject payload = new JSONObject(); payload.put("model", model); payload.put("stream", false); payload.put("temperature", .6); payload.put("max_tokens", 260);
+        JSONArray messages = new JSONArray(); messages.put(new JSONObject().put("role", "system").put("content", "You are an opt-in notification assistant. Read only the permitted text supplied in this conversation and give a concise useful reply. Personality: " + prefs(appContext).getString("personality", "Helpful, warm, concise, and practical.") + " Return plain text only. Never use markdown, stars, pipes, tables, headings, code fences, or decorative formatting."));
+        JSONArray saved = memory(appContext); for (int index = 0; index < saved.length(); index++) { JSONObject item = saved.optJSONObject(index); if (item != null) messages.put(item); }
+        payload.put("messages", messages);
+        HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection(); connection.setRequestMethod("POST"); connection.setConnectTimeout(20000); connection.setReadTimeout(30000); connection.setRequestProperty("Authorization", "Bearer " + apiKey); connection.setRequestProperty("Content-Type", "application/json"); connection.setDoOutput(true);
+        try (OutputStream output = connection.getOutputStream()) { output.write(payload.toString().getBytes("UTF-8")); }
+        int code = connection.getResponseCode(); BufferedReader reader = new BufferedReader(new InputStreamReader(code >= 200 && code < 300 ? connection.getInputStream() : connection.getErrorStream())); StringBuilder body = new StringBuilder(); String line; while ((line = reader.readLine()) != null) body.append(line); reader.close(); if (code < 200 || code >= 300) throw new Exception(body.toString());
+        JSONObject response = new JSONObject(body.toString()); JSONArray choices = response.optJSONArray("choices"); JSONObject choice = choices == null ? null : choices.optJSONObject(0); JSONObject message = choice == null ? null : choice.optJSONObject("message"); String answer = message == null ? "" : plain(message.optString("content", "")); if (answer.isEmpty()) throw new Exception("The selected model returned no text."); addMemory(appContext, "assistant", answer); post(appContext, answer, false);
+      } catch (Exception error) { post(appContext, "Assistant could not reply: " + plain(error.getMessage()), false); }
+    });
+  }
+
+  private static void channel(Context context) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Screen-context AI replies", NotificationManager.IMPORTANCE_DEFAULT); channel.setDescription("Opt-in AI replies based on permitted visible text"); ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).createNotificationChannel(channel); } }
+  private static int flags() { return PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? PendingIntent.FLAG_MUTABLE : 0); }
+  private static void post(Context context, String answer, boolean thinking) {
+    channel(context);
+    Intent leaveIntent = new Intent(context, FloatingAIReplyReceiver.class).setAction(ACTION_LEAVE); PendingIntent leave = PendingIntent.getBroadcast(context, 901, leaveIntent, flags());
+    Intent replyIntent = new Intent(context, FloatingAIReplyReceiver.class).setAction(ACTION_REPLY); PendingIntent reply = PendingIntent.getBroadcast(context, 902, replyIntent, flags());
+    RemoteInput input = new RemoteInput.Builder(EXTRA_REPLY).setLabel("Reply to Floating AI").build();
+    Notification.Action respond = new Notification.Action.Builder(0, "Respond", reply).addRemoteInput(input).build();
+    Notification.Builder builder = new Notification.Builder(context, CHANNEL_ID).setSmallIcon(context.getApplicationInfo().icon).setContentTitle(thinking ? "Floating AI is thinking" : "Floating AI reply").setContentText(plain(answer)).setStyle(new Notification.BigTextStyle().bigText(plain(answer))).setAutoCancel(false).setOnlyAlertOnce(true).addAction(new Notification.Action.Builder(0, "Leave", leave).build()).addAction(respond);
+    ((NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE)).notify(NOTIFICATION_ID, builder.build());
+  }
+}

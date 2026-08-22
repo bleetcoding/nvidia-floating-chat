@@ -29,6 +29,7 @@ public class FloatingTextContextService extends AccessibilityService {
     }
     if (candidate != null && candidate != source) candidate.recycle();
     source.recycle();
+    FloatingNotificationAssistant.schedule(this);
   }
   @Override public void onInterrupt() { }
   @Override public void onDestroy() { active = null; if (focused != null) { focused.recycle(); focused = null; } super.onDestroy(); }

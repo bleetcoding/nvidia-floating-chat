@@ -37,6 +37,7 @@ export interface ProviderSettings {
   lastVerifiedModel?: string;
   assistantPersonality?: string;
   overlayContextEnabled?: boolean;
+  notificationAssistantEnabled?: boolean;
   overlayVoiceEnabled?: boolean;
   overlayPanelHeightDp?: number;
   overlayPanelWidthDp?: number;
@@ -69,6 +70,7 @@ export const defaultProviderSettings: ProviderSettings = {
   model: "",
   assistantPersonality: "Helpful, warm, concise, and practical. Match the user’s language and give clear next steps.",
   overlayContextEnabled: false,
+  notificationAssistantEnabled: false,
   overlayVoiceEnabled: false,
   overlayPanelHeightDp: 380,
   overlayPanelWidthDp: 344,

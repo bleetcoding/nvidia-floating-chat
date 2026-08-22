@@ -198,6 +198,8 @@ export async function streamChatCompletion({
   signal: AbortSignal;
   onDelta: (delta: string) => void;
 }): Promise<void> {
+  const includesImage = currentAttachments.some((attachment) => attachment.kind === "image" && Boolean(attachment.imageDataUrl));
+  const visionInstruction = includesImage ? " The user intentionally attached one or more images. Inspect their visual content carefully and answer from both the image and the written prompt. Do not claim to see an image unless one is attached." : "";
   const response = await fetch(chatCompletionsUrl(settings.endpoint), {
     method: "POST",
     signal,
@@ -205,7 +207,7 @@ export async function streamChatCompletion({
     body: JSON.stringify({
       model: settings.model.trim(),
       messages: [
-        ...(combineAssistantInstructions(assistantPersonality, systemInstruction) ? [{ role: "system", content: combineAssistantInstructions(assistantPersonality, systemInstruction)! }] : []),
+        ...(combineAssistantInstructions(assistantPersonality, systemInstruction) || visionInstruction ? [{ role: "system", content: `${combineAssistantInstructions(assistantPersonality, systemInstruction) ?? "You are a helpful assistant."}${visionInstruction}`.trim() }] : []),
         ...messages.map((message, index) => ({
           role: message.role,
           content: index === messages.length - 1 && message.role === "user" ? messageContent(message, currentAttachments) : message.content,

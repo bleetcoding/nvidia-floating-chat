@@ -10,6 +10,7 @@ export type OverlayPreferences = {
   excerpt: string;
   personality: string;
   contextEnabled: boolean;
+  notificationAssistantEnabled: boolean;
   voiceEnabled: boolean;
   panelHeightDp: number;
   panelWidthDp: number;
@@ -33,7 +34,7 @@ type FloatingBubbleBridge = {
   stopBubble: () => Promise<boolean>;
   updateAppearance: (sizeDp: number, color: string) => Promise<boolean>;
   updateOverlayPreview: (title: string, excerpt: string) => Promise<boolean>;
-  updateOverlayPreferences: (title: string, excerpt: string, personality: string, contextEnabled: boolean, voiceEnabled: boolean, panelHeightDp: number, panelWidthDp: number, panelOpacity: number, perAppLayoutsEnabled: boolean, contextExclusionsEnabled: boolean, contextExcludedPackages: string) => Promise<boolean>;
+  updateOverlayPreferences: (title: string, excerpt: string, personality: string, contextEnabled: boolean, notificationAssistantEnabled: boolean, voiceEnabled: boolean, panelHeightDp: number, panelWidthDp: number, panelOpacity: number, perAppLayoutsEnabled: boolean, contextExclusionsEnabled: boolean, contextExcludedPackages: string) => Promise<boolean>;
   openAccessibilitySettings: () => Promise<boolean>;
   isAccessibilityEnabled: () => Promise<boolean>;
 };
@@ -67,7 +68,7 @@ export const floatingBubble = {
     return bridge ? bridge.updateOverlayPreview(title, excerpt) : false;
   },
   async updateOverlayPreferences(preferences: OverlayPreferences): Promise<boolean> {
-    return bridge ? bridge.updateOverlayPreferences(preferences.title, preferences.excerpt, preferences.personality, preferences.contextEnabled, preferences.voiceEnabled, preferences.panelHeightDp, preferences.panelWidthDp, preferences.panelOpacity, preferences.perAppLayoutsEnabled, preferences.contextExclusionsEnabled, preferences.contextExcludedPackages) : false;
+    return bridge ? bridge.updateOverlayPreferences(preferences.title, preferences.excerpt, preferences.personality, preferences.contextEnabled, preferences.notificationAssistantEnabled, preferences.voiceEnabled, preferences.panelHeightDp, preferences.panelWidthDp, preferences.panelOpacity, preferences.perAppLayoutsEnabled, preferences.contextExclusionsEnabled, preferences.contextExcludedPackages) : false;
   },
   async openAccessibilitySettings(): Promise<boolean> {
     return bridge ? bridge.openAccessibilitySettings() : false;
