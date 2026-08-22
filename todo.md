@@ -52,3 +52,8 @@
 - [x] Improve active-editor replacement and silently fall back to plain-text clipboard copy when a third-party field rejects replacement
 - [x] Remove intrusive copied and replacement-failure popups and unnecessary result controls
 - [x] Sanitize every copied and inserted AI response to remove Markdown and decorative characters
+- [x] Add optional per-app floating-panel layout presets for saved size, position, and opacity
+- [x] Add an opacity slider for the floating assistant window
+- [x] Rebuild the native keyboard action strip so AI controls are visible while typing in third-party apps
+- [x] Improve active-field text capture and one-tap rewrite-and-replace behavior in the native keyboard
+- [x] Add clearer in-app keyboard enable and switch guidance for using Floating AI Keyboard instead of Gboard

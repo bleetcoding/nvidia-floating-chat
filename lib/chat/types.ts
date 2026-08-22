@@ -40,6 +40,8 @@ export interface ProviderSettings {
   overlayVoiceEnabled?: boolean;
   overlayPanelHeightDp?: number;
   overlayPanelWidthDp?: number;
+  overlayOpacity?: number;
+  perAppLayoutsEnabled?: boolean;
   keyboardHeightDp?: number;
   keyboardKeyScale?: number;
   keyboardActionRows?: number;
@@ -70,6 +72,8 @@ export const defaultProviderSettings: ProviderSettings = {
   overlayVoiceEnabled: false,
   overlayPanelHeightDp: 380,
   overlayPanelWidthDp: 344,
+  overlayOpacity: 0.96,
+  perAppLayoutsEnabled: false,
   keyboardHeightDp: 350,
   keyboardKeyScale: 1,
   keyboardActionRows: 1,

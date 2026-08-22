@@ -87,4 +87,4 @@ function withBubblePackage(config) {
   });
 }
 
-module.exports = createRunOncePlugin((config) => withBubblePackage(withBubbleNativeSources(withBubbleManifest(config))), PLUGIN_NAME, "2.1.0");
+module.exports = createRunOncePlugin((config) => withBubblePackage(withBubbleNativeSources(withBubbleManifest(config))), PLUGIN_NAME, "2.2.0");

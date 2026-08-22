@@ -12,10 +12,13 @@ import java.util.HashSet;
 public class FloatingTextContextService extends AccessibilityService {
   private static FloatingTextContextService active;
   private static AccessibilityNodeInfo focused;
+  private static String activePackage = "";
 
   @Override public void onServiceConnected() { active = this; }
   @Override public void onAccessibilityEvent(AccessibilityEvent event) {
-    if (event == null || event.getPackageName() == null || getPackageName().contentEquals(event.getPackageName())) return;
+    if (event == null || event.getPackageName() == null) return;
+    activePackage = event.getPackageName().toString();
+    if (getPackageName().contentEquals(event.getPackageName())) return;
     if (excluded(event.getPackageName())) { clearFocused(); return; }
     AccessibilityNodeInfo source = event.getSource();
     if (source == null) return;
@@ -34,6 +37,7 @@ public class FloatingTextContextService extends AccessibilityService {
     String value = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
     return value != null && value.contains(context.getPackageName() + "/." + FloatingTextContextService.class.getSimpleName());
   }
+  public static String activePackage() { return activePackage; }
 
   public static String visibleText(int limit) {
     if (active == null) return "";
